@@ -1,0 +1,137 @@
+---
+title: "OU process inference"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(deSolve)
+library(rstan)
+options(mc.cores=4)
+rstan_options(auto_write=TRUE)
+```
+
+Simulate some data with noise
+```{r}
+T <- 10
+N <- 500
+X_0 <- 10
+theta <- 1
+sigma <- 1
+sigma_n <- 1
+t <- seq(0, T, T/N)
+X <- simulate_ou_exact(X_0, T, N, theta, sigma)
+y <- rnorm(length(X), X, sigma_n)
+df <- tibble(t, y=y)
+df %>%
+  ggplot(aes(x=t, y=y)) +
+  geom_line()
+# saveRDS(df, "../data/processed/ou_simulation.rds")
+# write.csv(df, "../data/processed/ou_simulation.csv",
+#           row.names = F)
+# df <- read.csv("../data/processed/ou_simulation.csv")
+# X <- df$y
+# t <- df$t
+```
+
+# Exact inference
+Perform exact inference for this process assuming that:
+
+X_obs ~ normal(X_true, sigma_n)
+
+```{r}
+# remove first element of t and X to avoid delta
+model <- stan_model("ou_exact_noise.stan")
+stan_data <- list(
+  N=length(X),
+  t=t,
+  X=y,
+  X_0=X_0)
+
+fit <- sampling(model, data=stan_data,
+                iter=100, chains=4)
+print(fit, c("theta", "sigma", "sigma_n"))
+# saveRDS(fit, "../data/processed/ou_exact_fit.rds")
+```
+
+# Approximate inference using KL expansion of SDE into an ODE
+
+Fit models with lots of different Z counts
+```{r}
+model_approx_noise_informative <- stan_model("ou_approx_noise_informative.stan")
+
+fit_model_any_z <- function(N_zs, refresh_val=0, iters=400) {
+  stan_data <- list(
+  nobs=length(X),
+  t=t,
+  X=X,
+  X_0=X_0,
+  N=N_zs,
+  T=T,
+  sigma_mean=0,
+  sigma_width=10)
+  init_fn <- function() {
+    list(theta=theta,
+         Z=as.array(rep(1, N_zs)),
+         sigma=sigma,
+         sigma_n=1)
+  }
+  fit <- sampling(model_approx_noise_informative,
+                data=stan_data,
+                iter=iters, chains=4, init=init_fn,
+                refresh=refresh_val)
+  fit
+}
+
+# fit model with many different Zs
+fit_2 <- fit_model_any_z(2, 0)
+fit_3 <- fit_model_any_z(3, 0)
+fit_4 <- fit_model_any_z(4, 0)
+fit_5 <- fit_model_any_z(5, 0)
+fit_10 <- fit_model_any_z(10, 0)
+fit_20 <- fit_model_any_z(20, 0)
+fit_40 <- fit_model_any_z(40, 0)
+```
+
+
+Looking at estimates of parameters as a function of N
+```{r}
+extract_param <- function(param_name, fit) {
+  rstan::extract(fit, param_name)[[1]]
+}
+lfits <- list(fit, fit_2, fit_3, fit_4, fit_5,
+              fit_10, fit_20, fit_40)
+Ns <- c("true", 2, 3, 4, 5, 10, 20, 40)
+params <- c("theta", "sigma", "sigma_n")
+k <- 1
+for(j in seq_along(params)) {
+  for(i in seq_along(lfits)) {
+    draws <- extract_param(params[j], lfits[[i]])
+    temp <- tibble(value=draws,
+                   iter=seq_along(draws),
+                   N=Ns[i],
+                   param=params[j])
+    if(k == 1)
+      big_df <- temp
+    else
+      big_df <- big_df %>% bind_rows(temp)
+    k <- k + 1
+  }
+}
+big_df <- big_df %>% 
+  mutate(param=as.factor(param)) %>% 
+  mutate(param=fct_relevel(param, params))
+# saveRDS(big_df, "../data/processed/ou_approx_fits.rds")
+
+g <- ggplot(big_df,
+       aes(x=value, colour=as.factor(N))) +
+  geom_density(data=big_df %>% filter(N != "true") %>% 
+                 mutate(N=as.numeric(as.character(N)))) +
+  geom_density(data=big_df %>% filter(N == "true"),
+               colour="black", linetype=2) +
+  scale_color_brewer("N", palette = "Spectral") +
+  facet_wrap(~param, scales="free")
+ggsave("../figures/ou_fits_vs_actual.pdf", g,
+       width = 10, height = 6)
+```
+
