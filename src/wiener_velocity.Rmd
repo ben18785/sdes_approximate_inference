@@ -1,0 +1,18 @@
+---
+title: "Wiener velocity"
+output: html_notebook
+---
+
+In this notebook, we perform inference on noisy measurements of the following bivariate SDE:
+
+\begin{equation}
+    dX(t) = \begin{bmatrix}
+   0 & 1\\
+   0 & 0 
+   \end{bmatrix} X(t) dt + \begin{bmatrix}
+   0\\
+   \sqrt{q} 
+   \end{bmatrix}dW(t)
+\end{equation}
+
+and where $X(t) = [X_1(t), X_2(t)]'$.

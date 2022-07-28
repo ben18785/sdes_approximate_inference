@@ -5,104 +5,139 @@ output: html_notebook
 
 ```{r}
 library(tidyverse)
-library(deSolve)
 library(rstan)
+library(loo)
 options(mc.cores=4)
 rstan_options(auto_write=TRUE)
+source("helper.R")
 ```
 
-Simulate some data with noise
+In this notebook, we perform inference for the Orstein-Uhlenbeck (OU) process, which is described by the following SDE:
+
+\begin{equation}
+  dX(t) = -\theta X(t) dt + \kappa dW(t).
+\end{equation}
+
+Throughout, we assume that $X(0)=10$ which is known, and $\theta$ and $\kappa$ are unknowns which we attempt to estimate. The observations are corrupted by Gaussian measurement noise of the form:
+
+\begin{equation}
+  Y(t) \stackrel{i.i.d.}{\sim} \text{normal}(X(t), \sigma).
+\end{equation}
+
+We assume that $\sigma$ is also unknown.
+
+We first simulate some data from the OU process with measurement noise using known parameters. Exact simulation of the OU process is possible, since the following probability distribution governs the density:
+
+\begin{equation}
+X(t+\delta t) | X(t) \sim \text{normal}(X(t)\exp(-\theta \delta_t), \frac{\kappa^2}{2\theta}(1 - \exp(-2\theta \delta_t)))
+\end{equation}
+
+We first use this to simulate the state $X(t)$.
 ```{r}
+simulate_ou <- function(X_0, T, N, theta, kappa) {
+  delta_t <- T / N
+  D <- kappa^2 / 2
+  var <- D / theta * (1 - exp(-2 * delta_t))
+  X <- vector(length = (N + 1))
+  X[1] <- X_0
+  for(i in 1:N) {
+    X[i + 1] <- rnorm(1, X[i] * exp(-theta * delta_t), sqrt(var))
+  }
+  X
+}
+
 T <- 10
 N <- 500
 X_0 <- 10
 theta <- 1
-sigma <- 1
-sigma_n <- 1
+kappa <- 1
 t <- seq(0, T, T/N)
-X <- simulate_ou_exact(X_0, T, N, theta, sigma)
-y <- rnorm(length(X), X, sigma_n)
-df <- tibble(t, y=y)
-df %>%
-  ggplot(aes(x=t, y=y)) +
+X <- simulate_ou(X_0, T, N, theta, kappa)
+
+# plot
+df <- tibble(t, X)
+df %>% 
+  ggplot(aes(x=t, y=X)) +
   geom_line()
-# saveRDS(df, "../data/processed/ou_simulation.rds")
-# write.csv(df, "../data/processed/ou_simulation.csv",
-#           row.names = F)
-# df <- read.csv("../data/processed/ou_simulation.csv")
-# X <- df$y
-# t <- df$t
+```
+We then add measurement noise and save the data for future use.
+```{r}
+sigma_n <- 1
+Y <- rnorm(length(X), X, sigma_n)
+df <- df %>% 
+  mutate(Y=Y)
+df %>%
+  ggplot(aes(x=t, y=Y)) +
+  geom_line()
+saveRDS(df, "../data/processed/ou_simulation.rds")
 ```
 
 # Exact inference
-Perform exact inference for this process assuming that:
+We now perform exact inference for the process. To do so, we use the result that if $X\sim \mathcal{N}(\mu, \Sigma)$ then $Y\sim \mathcal{N}(X, \sigma^2 I)$, then:
 
-X_obs ~ normal(X_true, sigma_n)
+\begin{equation}
+  Y\sim \mathcal{N}(\mu, \Sigma + \sigma^2 I)
+\end{equation}
+
+It is straightforward to construct the matrix $\Sigma$. To do so, we consider:
+
+\begin{align}
+  \text{cov}(X(t), X(t+\delta t)) &= \text{cov}(X(t), X(t)\exp(-\theta\delta t) + \epsilon_t)\\
+  &= \text{cov}(X(t), X(t)\exp(-\theta\delta t))\\
+  &= \exp(-\theta\delta t)\text{var}(X(t))
+  &= \exp(-\theta\delta t) \times \kappa^2 / 2 (1 - \exp(-2\theta t))\\
+  &= \kappa^2 / 2 (\exp(-\theta\delta t) - \exp(-\theta (2t + \delta_t)))
+\end{align}
+
+where $\text{var}(X(t)) = \kappa^2 / 2 (1 - \exp(-2\theta t))$ is the variance of the OU process. More generally, the covariance between $X(t_1)$ and $X(t_2)$ is given by the result:
+
+\begin{equation}
+  \text{cov}(X(t_1), X(t_2)) = \kappa^2 / 2 (\exp(\theta|t_1-t_2|) - \exp(\theta(t_1 + t_2))).
+\end{equation}
 
 ```{r}
 # remove first element of t and X to avoid delta
-model <- stan_model("ou_exact_noise.stan")
+model <- stan_model("stan/ou_exact.stan")
 stan_data <- list(
   N=length(X),
   t=t,
-  X=y,
+  Y=df$Y,
   X_0=X_0)
 
 fit <- sampling(model, data=stan_data,
-                iter=100, chains=4)
+                iter=400, chains=4)
 print(fit, c("theta", "sigma", "sigma_n"))
 # saveRDS(fit, "../data/processed/ou_exact_fit.rds")
 ```
 
 # Approximate inference using KL expansion of SDE into an ODE
-
 Fit models with lots of different Z counts
 ```{r}
-model_approx_noise_informative <- stan_model("ou_approx_noise_informative.stan")
+model_approx <- stan_model("stan/ou_approx.stan")
 
-fit_model_any_z <- function(N_zs, refresh_val=0, iters=400) {
-  stan_data <- list(
-  nobs=length(X),
-  t=t,
-  X=X,
-  X_0=X_0,
-  N=N_zs,
-  T=T,
-  sigma_mean=0,
-  sigma_width=10)
-  init_fn <- function() {
+# fit model with many different Zs
+init_fn <- function() {
     list(theta=theta,
          Z=as.array(rep(1, N_zs)),
          sigma=sigma,
          sigma_n=1)
   }
-  fit <- sampling(model_approx_noise_informative,
-                data=stan_data,
-                iter=iters, chains=4, init=init_fn,
-                refresh=refresh_val)
-  fit
+Nzs <- c(2, 4, 8, 16, 32, 64, 128)
+lfits <- vector(mode="list", length = length(Nzs))
+for(i in seq_along(Nzs)) {
+  print(paste0("i = ", i))
+  lfits[[i]] <- fit_model_any_z(NZs[i], model_approx,
+                                init_fn)
 }
-
-# fit model with many different Zs
-fit_2 <- fit_model_any_z(2, 0)
-fit_3 <- fit_model_any_z(3, 0)
-fit_4 <- fit_model_any_z(4, 0)
-fit_5 <- fit_model_any_z(5, 0)
-fit_10 <- fit_model_any_z(10, 0)
-fit_20 <- fit_model_any_z(20, 0)
-fit_40 <- fit_model_any_z(40, 0)
 ```
-
 
 Looking at estimates of parameters as a function of N
 ```{r}
 extract_param <- function(param_name, fit) {
   rstan::extract(fit, param_name)[[1]]
 }
-lfits <- list(fit, fit_2, fit_3, fit_4, fit_5,
-              fit_10, fit_20, fit_40)
-Ns <- c("true", 2, 3, 4, 5, 10, 20, 40)
-params <- c("theta", "sigma", "sigma_n")
+Ns <- c("true", Nzs)
+params <- c("theta", "kappa", "sigma_n")
 k <- 1
 for(j in seq_along(params)) {
   for(i in seq_along(lfits)) {
@@ -121,7 +156,7 @@ for(j in seq_along(params)) {
 big_df <- big_df %>% 
   mutate(param=as.factor(param)) %>% 
   mutate(param=fct_relevel(param, params))
-# saveRDS(big_df, "../data/processed/ou_approx_fits.rds")
+saveRDS(big_df, "../data/processed/ou_approx_fits.rds")
 
 g <- ggplot(big_df,
        aes(x=value, colour=as.factor(N))) +
@@ -133,5 +168,16 @@ g <- ggplot(big_df,
   facet_wrap(~param, scales="free")
 ggsave("../figures/ou_fits_vs_actual.pdf", g,
        width = 10, height = 6)
+```
+
+Extract log-likelihoods to perform model comparison
+```{r}
+loos <- vector(length = length(lfits))
+for(i in seq_along(loos)) {
+  log_like <- extract_log_lik(lfits[[i]], "loglikelihood")
+  loos[[i]] <- loo(log_like)
+}
+saveRDS(loos, "../data/processed/ou_loos.rds")
+loo_compare(loos)
 ```
 

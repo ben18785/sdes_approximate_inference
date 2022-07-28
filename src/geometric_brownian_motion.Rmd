@@ -1,0 +1,144 @@
+---
+title: "Geometric Brownian motion"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(deSolve)
+library(rstan)
+options(mc.cores=4)
+rstan_options(auto_write=TRUE)
+source("helper.R")
+```
+
+In this notebook, we perform inference for geometric Brownian motion, which has an SDE:
+
+\begin{equation}
+  dX(t) = \theta X(t) + \kappa X(t) dW(t)
+\end{equation}
+
+This SDE has a the following probability density, which allows us to exactly simulate from the process:
+
+\begin{equation}
+  X(t+\delta t) | X(t) \sim \text{log-normal}(\log X(t) + (\theta - 0.5\kappa^2)\delta_t, \kappa \sqrt{t})
+\end{equation}
+
+
+```{r}
+simulate_gbm <- function(X_0, T, N, theta, kappa) {
+  delta_t <- T / N
+  X <- vector(length = (N + 1))
+  X[1] <- X_0
+  for(i in 1:N) {
+    X[i + 1] <- rlnorm(1, log(X[i]) + (theta - 0.5 * kappa^2) * delta_t, kappa * sqrt(delta_t))
+  }
+  X
+}
+
+T <- 10
+N <- 500
+X_0 <- 1
+theta <- 0.5
+kappa <- 0.5
+X <- simulate_gbm(X_0, T, N, theta, kappa)
+t <- seq(0, T, T/N)
+
+# plot
+df <- tibble(t, X)
+df %>% 
+  ggplot(aes(x=t, y=X)) +
+  geom_line()
+```
+
+We now add some noise to the data.
+```{r}
+sigma_n <- 0.1
+Y <- rlnorm(length(X), log(X) - 0.5 * sigma_n^2, sigma_n)
+df <- df %>% 
+  mutate(Y=Y)
+df %>% 
+  ggplot(aes(x=t, y=Y)) +
+  geom_line()
+saveRDS(df, "../data/processed/gbm_simulation.rds")
+```
+
+# Approximate inference
+```{r}
+model_approx <- stan_model("stan/gbm_approx.stan")
+
+# fit model with many different Zs
+init_fn <- function() {
+    list(theta=theta,
+         Z=as.array(rep(1, N_zs)),
+         sigma=sigma,
+         sigma_n=1)
+  }
+Nzs <- c(2, 4, 8, 16, 32, 64, 128)
+lfits <- vector(mode="list", length = length(Nzs))
+for(i in seq_along(Nzs)) {
+  print(paste0("i = ", i))
+  lfits[[i]] <- fit_model_any_z(NZs[i], model_approx,
+                                init_fn)
+}
+```
+
+Looking at estimates of parameters as a function of N
+```{r}
+extract_param <- function(param_name, fit) {
+  rstan::extract(fit, param_name)[[1]]
+}
+Ns <- c("true", Nzs)
+params <- c("theta", "kappa", "sigma_n")
+k <- 1
+for(j in seq_along(params)) {
+  for(i in seq_along(lfits)) {
+    draws <- extract_param(params[j], lfits[[i]])
+    temp <- tibble(value=draws,
+                   iter=seq_along(draws),
+                   N=Ns[i],
+                   param=params[j])
+    if(k == 1)
+      big_df <- temp
+    else
+      big_df <- big_df %>% bind_rows(temp)
+    k <- k + 1
+  }
+}
+big_df <- big_df %>% 
+  mutate(param=as.factor(param)) %>% 
+  mutate(param=fct_relevel(param, params))
+saveRDS(big_df, "../data/processed/gbm_approx_fits.rds")
+
+short_df <- tribble(
+  ~param, ~value,
+  "theta", theta,
+  "sigma", sigma,
+  "sigma_n", sigma_n
+) %>% 
+  mutate(param=as.factor(param)) %>% 
+  mutate(param=fct_relevel(param, params))
+
+g <- ggplot(big_df,
+       aes(x=value)) +
+  geom_density(aes(colour=as.factor(N)), data=big_df %>% filter(N != "true") %>%
+                 mutate(N=as.numeric(as.character(N)))) +
+  geom_density(aes(colour=as.factor(N)), data=big_df %>% filter(N == "true"),
+               colour="black", linetype=2) +
+  scale_color_brewer("N", palette = "Spectral") +
+   geom_vline(data=short_df, aes(xintercept=value), linetype=3) +
+  facet_wrap(~param, scales="free")
+ggsave("../figures/gbm_fits_vs_actual.pdf", g,
+       width = 10, height = 6)
+```
+
+Extract log-likelihoods to perform model comparison
+```{r}
+loos <- vector(length = length(lfits))
+for(i in seq_along(loos)) {
+  log_like <- extract_log_lik(lfits[[i]], "loglikelihood")
+  loos[[i]] <- loo(log_like)
+}
+saveRDS(loos, "../data/processed/gbm_loos.rds")
+loo_compare(loos)
+```
