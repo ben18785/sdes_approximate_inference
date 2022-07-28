@@ -1,0 +1,155 @@
+---
+title: "Double well diffusion"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(rstan)
+library(loo)
+options(mc.cores=4)
+rstan_options(auto_write=TRUE)
+source("helper.R")
+set.seed(1)
+```
+
+In this notebook, we consider inference for the following SDE:
+
+\begin{equation}
+ dX(t) = \alpha X(t) (\gamma^2 - X(t)^2) dt + \kappa dW(t)
+\end{equation}
+
+where $\alpha>0$, $\gamma>0$ and $B>0$. To simulate data from this process, we used an Euler-Maruyama scheme.
+
+```{r}
+brownian_motion <- function(T, N) {
+  delta_t <- T / N
+  dW <- rnorm(N, 0, sqrt(delta_t))
+  c(0, cumsum(dW))
+}
+
+simulate_double_well <- function(X_0, T, N, alpha, gamma, kappa) {
+  W <- brownian_motion(T, N)
+  delta_t <- T / N
+  X <- vector(length = (N + 1))
+  X[1] <- X_0
+  for(i in 1:N) {
+    X[i + 1] <- X[i] +  alpha * X[i] * (gamma^2 - X[i]^2) * delta_t + kappa * (W[i + 1] - W[i])
+  }
+  X
+}
+
+T <- 10
+Npoints <- 5000
+X_0 <- 0
+alpha <- 2
+gamma <- 1
+kappa <- 1
+X <- simulate_double_well(X_0, T, Npoints, alpha, gamma, kappa)
+
+# observe process less regularly
+N <- 500
+tfull <- seq(0, T, T / Npoints)
+t <- seq(0, T, T / N)
+X <- approx(tfull, X, t)$y
+
+# plot
+df <- tibble(t, X)
+df %>% 
+  ggplot(aes(x=t, y=X)) +
+  geom_line()
+```
+
+Add measurement noise to the data.
+```{r}
+sigma_n <- 1
+Y <- rnorm(length(X), X, sigma_n)
+df <- df %>% 
+  mutate(Y=Y)
+df %>%
+  ggplot(aes(x=t, y=Y)) +
+  geom_line()
+saveRDS(df, "../data/processed/double_well_simulation.rds")
+
+# remove zero time entry as causes issues for ODE integrator in Stan
+df <- df %>% 
+  filter(t > 0)
+```
+
+
+# Approximate inference
+```{r}
+model_approx <- stan_model("stan/double_well_approx.stan")
+
+# fit model with many different Zs
+init_fn_list <- list(
+  alpha=2,
+  gamma=1,
+  kappa=1,
+  sigma_n=1)
+Nzs <- c(2, 4, 8, 16, 32, 64, 128)
+stan_data <- list(
+    nobs=nrow(df),
+    t=df$t,
+    Y=df$Y,
+    X_0=X_0,
+    T=T,
+    kappa_mean=0,
+    kappa_width=10)
+lfits <- vector(mode="list", length = length(Nzs))
+for(i in seq_along(Nzs)) {
+  print(paste0("i = ", i))
+  lfits[[i]] <- fit_model_any_z(
+    Nzs[i], model_approx, init_fn_list, stan_data)
+}
+```
+
+Looking at estimates of parameters as a function of N
+```{r}
+extract_param <- function(param_name, fit) {
+  rstan::extract(fit, param_name)[[1]]
+}
+Ns <- c("true", Nzs)
+params <- c("alpha", "gamma", "kappa", "sigma_n")
+k <- 1
+for(j in seq_along(params)) {
+  for(i in seq_along(lfits)) {
+    draws <- extract_param(params[j], lfits[[i]])
+    temp <- tibble(value=draws,
+                   iter=seq_along(draws),
+                   N=Ns[i],
+                   param=params[j])
+    if(k == 1)
+      big_df <- temp
+    else
+      big_df <- big_df %>% bind_rows(temp)
+    k <- k + 1
+  }
+}
+big_df <- big_df %>% 
+  mutate(param=as.factor(param)) %>% 
+  mutate(param=fct_relevel(param, params))
+saveRDS(big_df, "../data/processed/double_well_approx_fits.rds")
+
+g <- ggplot(big_df,
+       aes(x=value, colour=as.factor(N))) +
+  geom_density(data=big_df %>% filter(N != "true") %>% 
+                 mutate(N=as.numeric(as.character(N)))) +
+  geom_density(data=big_df %>% filter(N == "true"),
+               colour="black", linetype=2) +
+  scale_color_brewer("N", palette = "Spectral") +
+  facet_wrap(~param, scales="free")
+ggsave("../figures/double_well_fits_vs_actual.pdf", g,
+       width = 10, height = 6)
+```
+
+Extract log-likelihoods to perform model comparison
+```{r}
+loos <- vector(length = length(lfits))
+for(i in seq_along(loos)) {
+  log_like <- extract_log_lik(lfits[[i]], "loglikelihood")
+  loos[[i]] <- loo(log_like)
+}
+saveRDS(loos, "../data/processed/double_well_loos.rds")
+loo_compare(loos)
+```

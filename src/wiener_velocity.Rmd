@@ -131,7 +131,7 @@ extract_param <- function(param_name, fit) {
   rstan::extract(fit, param_name)[[1]]
 }
 Ns <- c("true", Nzs)
-params <- c("theta", "kappa", "sigma_n")
+params <- c("q", "sigma_n")
 k <- 1
 for(j in seq_along(params)) {
   for(i in seq_along(lfits)) {
@@ -152,23 +152,13 @@ big_df <- big_df %>%
   mutate(param=fct_relevel(param, params))
 saveRDS(big_df, "../data/processed/wiener_approx_fits.rds")
 
-short_df <- tribble(
-  ~param, ~value,
-  "theta", theta,
-  "sigma", sigma,
-  "sigma_n", sigma_n
-) %>% 
-  mutate(param=as.factor(param)) %>% 
-  mutate(param=fct_relevel(param, params))
-
 g <- ggplot(big_df,
-       aes(x=value)) +
-  geom_density(aes(colour=as.factor(N)), data=big_df %>% filter(N != "true") %>%
+       aes(x=value, colour=as.factor(N))) +
+  geom_density(data=big_df %>% filter(N != "true") %>% 
                  mutate(N=as.numeric(as.character(N)))) +
-  geom_density(aes(colour=as.factor(N)), data=big_df %>% filter(N == "true"),
+  geom_density(data=big_df %>% filter(N == "true"),
                colour="black", linetype=2) +
   scale_color_brewer("N", palette = "Spectral") +
-   geom_vline(data=short_df, aes(xintercept=value), linetype=3) +
   facet_wrap(~param, scales="free")
 ggsave("../figures/wiener_fits_vs_actual.pdf", g,
        width = 10, height = 6)
