@@ -5,7 +5,6 @@ output: html_notebook
 
 ```{r}
 library(tidyverse)
-library(deSolve)
 library(rstan)
 options(mc.cores=4)
 rstan_options(auto_write=TRUE)

@@ -3,6 +3,16 @@ title: "Wiener velocity"
 output: html_notebook
 ---
 
+```{r}
+library(tidyverse)
+library(rstan)
+options(mc.cores=4)
+rstan_options(auto_write=TRUE)
+source("helper.R")
+library(mvtnorm)
+```
+
+
 In this notebook, we perform inference on noisy measurements of the following bivariate SDE:
 
 \begin{equation}
@@ -16,3 +26,71 @@ In this notebook, we perform inference on noisy measurements of the following bi
 \end{equation}
 
 and where $X(t) = [X_1(t), X_2(t)]'$.
+
+Exact simulation for this model is possible, since the transition density is multivariate normally distributed (eq. 17: https://advancesindifferenceequations.springeropen.com/articles/10.1186/s13662-019-2214-1). The mean of the process is given by:
+
+\begin{equation}
+mu(t + \delta t) = \exp(-\theta \delta t) X[t] = \begin{bmatrix}1 & \delta t \\
+ 0 & 1 \\
+ \end{bmatrix} X[t]
+\end{equation}
+
+where $\theta=\begin{bmatrix} 0 & -1\\ 0 & 0\\ \end{bmatrix}$. The covariance matrix is given by $\Sigma = \begin{bmatrix}\frac{q \delta t^3}{3} & \frac{q \delta t^2}{2} \\ \frac{q \delta t^2}{2} & q \delta t \\ \end{bmatrix}$.
+
+```{r}
+simulate_wiener <- function(X_1_0, X_2_0, T, N, q) {
+  delta_t <- T / N
+  X <- matrix(nrow=(N + 1), ncol=2)
+  M <- matrix(c(1, delta_t, 0, 1), byrow = TRUE, ncol = 2)
+  Sigma <- matrix(c((q * delta_t^3) / 3, (q * delta_t^2) / 2, (q * delta_t^2) / 2, q * delta_t), byrow = TRUE, ncol = 2)
+  X[1, ] <- c(X_1_0, X_2_0)
+  for(i in 1:N) {
+    X[i + 1, ] <- rmvnorm(1, M %*% X[i, ], Sigma)
+  }
+  X
+}
+
+T <- 10
+N <- 500
+X_1_0 <- 1
+X_2_0 <- 0
+q <- 1
+X <- simulate_wiener(X_1_0, X_2_0, T, N, q)
+t <- seq(0, T, T/N)
+df <- tibble(t=t, v=X[, 1], a=X[, 2])
+df %>% 
+  pivot_longer(-t) %>% 
+  ggplot(aes(x=t, y=value, colour=name)) +
+  geom_line() +
+  scale_color_brewer("Series", palette = "Dark2")
+```
+Now adding Gaussian measurement noise to the observed velocity series.
+```{r}
+sigma_n <- 1
+y <- rnorm(nrow(X), X[, 1], sigma_n)
+df <- df %>% 
+  mutate(Y=y)
+df %>% 
+  pivot_longer(-t) %>% 
+  ggplot(aes(x=t, y=value, colour=name)) +
+  geom_line() +
+  scale_color_brewer("Series", palette = "Dark2")
+```
+
+# Exact inference
+Since the SDE is linear, it is possible to use Kalman filtering to calculate the likelihood, and we can perform exact inference.
+```{r}
+model <- stan_model("stan/wiener_velocity.stan")
+stan_data <- list(
+  nobs=nrow(df),
+  t=df$t,
+  Y=df$Y,
+  X_1_0=X_1_0,
+  X_2_0=X_2_0,
+  delta_t = T / nobs
+)
+fit <- sampling(model, data=stan_data, iter=2000,
+                chains=4)
+saveRDS(fit, "../data/processed/wiener_velocity_exact_fit.rds")
+```
+
