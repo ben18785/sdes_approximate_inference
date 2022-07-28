@@ -13,9 +13,9 @@ functions {
 }
 
 data {
-  int N;
-  vector[N] t;
-  vector[N] Y;
+  int nobs;
+  vector[nobs] t;
+  vector[nobs] Y;
   real X_0;
 }
 
@@ -26,9 +26,9 @@ parameters {
 }
 
 model {
-  vector[N] mu = X_0 * exp(-theta * t);
+  vector[nobs] mu = X_0 * exp(-theta * t);
 
-  Y ~ multi_normal(mu, make_covariance(t, theta, kappa, sigma_n, N));
+  Y ~ multi_normal(mu, make_covariance(t, theta, kappa, sigma_n, nobs));
     
   theta ~ normal(0, 10);
   kappa ~ normal(0, 10);

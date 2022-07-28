@@ -3,8 +3,8 @@ functions {
   vector phi(real t, vector i, real T) {
     return((2 / T)^0.5 * cos((2 * i - 1) * pi() * t / (2 * T)));
   }
-  real z_sum(vector Zs, real t, real T, vector one_to_N) {
-    return(sum(Zs .* phi(t, one_to_N, T)));
+  vector z_sum(matrix Zs, real t, real T, vector one_to_N) {
+    return(Zs * phi(t, one_to_N, T));
   }
   
   real[] random_rhs(real t,
@@ -17,12 +17,19 @@ functions {
     vector[N] one_to_N = to_vector(d_r);
     real q = params[1];
     real T = params[2];
-    vector[N] Zs = to_vector(params[3:]);
+    vector[2 * N] Zs_all = to_vector(params[3:]);
     vector[2] X = [y[1], y[2]]';
-    vector[2] L = [0.0, sqrt(q)]';
+    matrix[2, 2] L;
     real dXdt[2];
     vector[2] dXdt_vec;
     matrix[2, 2] F;
+    matrix [2, N] Zs;
+    Zs[1, :] = to_row_vector(Zs_all[1:N]);
+    Zs[2, :] = to_row_vector(Zs_all[(N + 1):2 * N]);
+    L[1, 1] = 0.0;
+    L[1, 2] = 0.0;
+    L[2, 1] = 0.0;
+    L[2, 2] = sqrt(q);
     F[1, 1] = 0.0;
     F[1, 2] = 1.0;
     F[2, 1] = 0.0;
@@ -53,16 +60,16 @@ transformed data {
 
 parameters {
   real<lower=0> q;
-  real Z[N];
+  real Z[2 * N];
   real<lower=0> sigma_n;
 }
 
 transformed parameters {
-  real params[2 + N];
+  real params[2 + 2 * N];
   real X_sim[nobs, 2];
   params[1] = q;
   params[2] = T;
-  for(i in 1:N)
+  for(i in 1:(2 * N))
     params[2 + i] = Z[i];
     
   X_sim = integrate_ode_rk45(random_rhs, {X_1_0, X_2_0}, 0.0, t, params, d_r, d_i);

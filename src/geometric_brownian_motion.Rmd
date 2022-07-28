@@ -9,6 +9,7 @@ library(rstan)
 options(mc.cores=4)
 rstan_options(auto_write=TRUE)
 source("helper.R")
+set.seed(1)
 ```
 
 In this notebook, we perform inference for geometric Brownian motion, which has an SDE:
@@ -60,6 +61,10 @@ df %>%
   ggplot(aes(x=t, y=Y)) +
   geom_line()
 saveRDS(df, "../data/processed/gbm_simulation.rds")
+
+# remove zero time entry as causes issues for ODE integrator in Stan
+df <- df %>% 
+  filter(t > 0)
 ```
 
 # Approximate inference
@@ -67,18 +72,24 @@ saveRDS(df, "../data/processed/gbm_simulation.rds")
 model_approx <- stan_model("stan/gbm_approx.stan")
 
 # fit model with many different Zs
-init_fn <- function() {
-    list(theta=theta,
-         Z=as.array(rep(1, N_zs)),
-         sigma=sigma,
-         sigma_n=1)
-  }
+stan_data <- list(
+    nobs=nrow(df),
+    t=df$t,
+    Y=df$Y,
+    X_0=X_0,
+    T=T,
+    kappa_mean=0,
+    kappa_width=10)
+init_fn_list <- list(
+  theta=theta,
+  sigma=sigma,
+  sigma_n=1)
 Nzs <- c(2, 4, 8, 16, 32, 64, 128)
 lfits <- vector(mode="list", length = length(Nzs))
 for(i in seq_along(Nzs)) {
   print(paste0("i = ", i))
-  lfits[[i]] <- fit_model_any_z(NZs[i], model_approx,
-                                init_fn)
+  lfits[[i]] <- fit_model_any_z(
+    Nzs[i], model_approx, init_fn_list, stan_data)
 }
 ```
 

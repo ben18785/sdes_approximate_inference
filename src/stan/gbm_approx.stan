@@ -23,7 +23,7 @@ functions {
 data {
   int nobs;
   real t[nobs];
-  vector[nobs] X;
+  vector[nobs] Y;
   real X_0;
   int N;
   real T;
@@ -63,7 +63,7 @@ transformed parameters {
 model {
   
   for(i in 1:nobs)
-    X[i] ~ lognormal(log(X_sim[i,1]) - 0.5 * sigma_n^2, sigma_n);
+    Y[i] ~ lognormal(log(X_sim[i,1]) - 0.5 * sigma_n^2, sigma_n);
   
   Z ~ normal(0, 1);
   theta ~ normal(0, 10);
@@ -74,5 +74,5 @@ model {
 generated quantities {
   vector[nobs] loglikelihood;
   for(i in 1:nobs)
-    loglikelihood[i] = lognormal_lpdf(X[i]|log(X_sim[i,1]) - 0.5 * sigma_n^2, sigma_n);
+    loglikelihood[i] = lognormal_lpdf(Y[i]|log(X_sim[i,1]) - 0.5 * sigma_n^2, sigma_n);
 }
