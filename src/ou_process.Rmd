@@ -70,7 +70,7 @@ df <- df %>%
 df %>%
   ggplot(aes(x=t, y=Y)) +
   geom_line()
-saveRDS(df, "../data/processed/ou_simulation.rds")
+# saveRDS(df, "../data/processed/ou_simulation.rds")
 
 # remove zero time entry as causes issues for ODE integrator in Stan
 df <- df %>% 
@@ -111,7 +111,7 @@ stan_data <- list(
 
 fit <- sampling(model, data=stan_data,
                 iter=800, chains=4)
-print(fit, c("theta", "sigma", "sigma_n"))
+print(fit, c("theta", "kappa", "sigma_n"))
 saveRDS(fit, "../data/processed/ou_exact_fit.rds")
 ```
 
@@ -138,7 +138,7 @@ lfits <- vector(mode="list", length = length(Nzs))
 for(i in seq_along(Nzs)) {
   print(paste0("i = ", i))
   lfits[[i]] <- fit_model_any_z(
-    Nzs[i], model_approx, init_fn_list, stan_data)
+    Nzs[i], model_approx, init_fn_list, stan_data, iters=1000)
 }
 ```
 
@@ -150,6 +150,7 @@ extract_param <- function(param_name, fit) {
 Ns <- c("true", Nzs)
 params <- c("theta", "kappa", "sigma_n")
 k <- 1
+lfits <- c(fit, lfits)
 for(j in seq_along(params)) {
   for(i in seq_along(lfits)) {
     draws <- extract_param(params[j], lfits[[i]])
@@ -183,12 +184,137 @@ ggsave("../figures/ou_fits_vs_actual.pdf", g,
 
 Extract log-likelihoods to perform model comparison
 ```{r}
-loos <- vector(length = length(lfits))
+lfits <- lfits[-1]
+loos <- vector(length = length(lfits), mode="list")
 for(i in seq_along(loos)) {
   log_like <- extract_log_lik(lfits[[i]], "loglikelihood")
   loos[[i]] <- loo(log_like)
 }
 saveRDS(loos, "../data/processed/ou_loos.rds")
 loo_compare(loos)
+```
+
+# Optimisation for AIC comparison
+```{r}
+Nzs <- c(2, 4, 8, 16, 32, 64, 128)
+lopts <- vector(mode="list", length = length(Nzs))
+for(i in seq_along(Nzs)) {
+  print(paste0("i = ", i))
+  lopts[[i]] <- optimise_model_any_z(
+    Nzs[i], model_approx, init_fn_list, stan_data)
+}
+
+# plot AIC
+lvals <- vector(length = length(Nzs))
+for(i in seq_along(lvals))
+  lvals[i] <- 2 * Nzs[i] - 2 * lopts[[i]]$value
+g <- tibble(N=Nzs, AIC=lvals) %>% 
+  ggplot(aes(x=N, y=AIC)) +
+  geom_point() +
+  geom_line()
+ggsave("../figures/ou_aics.pdf", g,
+       width = 8, height = 4)
+```
+
+# Thin series and repeat AIC exercise
+```{r}
+thin_series <- function(Nthin, df, T) {
+  tfull <- df$t
+  t <- seq(0, T, T / Nthin)
+  t <- t[-1]
+  Y <- approx(tfull, df$Y, t)$y
+  tibble(t=t, Y=Y)
+}
+
+aic_scan <- function(df, Nzs) {
+  lopts <- vector(mode="list", length = length(Nzs))
+  stan_data <- list(
+    nobs=nrow(df),
+    t=df$t,
+    Y=df$Y,
+    X_0=X_0,
+    T=T,
+    kappa_mean=0,
+    kappa_width=10)
+  
+  for(i in seq_along(Nzs)) {
+    print(paste0("i = ", i))
+    lopts[[i]] <- optimise_model_any_z(
+      Nzs[i], model_approx, init_fn_list, stan_data)
+  }
+  lvals <- vector(length = length(Nzs))
+for(i in seq_along(lvals))
+  lvals[i] <- 2 * Nzs[i] - 2 * lopts[[i]]$value
+  lvals
+}
+
+Nzs <- c(2, 4, 8, 16, 32, 64)
+Nthins <- c(round(10^seq(1.0, 2.5, 0.5)), N)
+m_aics <- matrix(nrow = length(Nzs),
+                 ncol = length(Nthins))
+for(i in seq_along(Nthins)) {
+  print(paste0("thin = ", i))
+  df_temp <- thin_series(Nthins[i], df, T)
+  m_aics[, i] <- aic_scan(df_temp, Nzs)
+}
+
+m_aics <- as.data.frame(m_aics)
+colnames(m_aics) <- Nthins
+m_aics <- m_aics %>% 
+  mutate(N=Nzs)
+saveRDS(m_aics, "../data/processed/ou_aics.rds")
+g <- m_aics %>% 
+  pivot_longer(-N) %>% 
+  mutate(name=as.factor(name)) %>% 
+  mutate(name=fct_relevel(name, as.character(Nthins))) %>% 
+  ggplot(aes(x=N, y=value)) +
+  geom_line() +
+  geom_point() +
+  scale_x_log10() +
+  facet_wrap(~name, scales="free")
+ggsave("../figures/ou_aics_thinning.pdf", g,
+       width = 12, height = 6)
+```
+
+# Test robustness of results to particular dataset
+```{r}
+N <- 5000
+X_0 <- 10
+theta <- 1
+kappa <- 1
+sigma_n <- 1
+t <- seq(0, T, T/N)
+X <- simulate_ou(X_0, T, N, theta, kappa)
+df <- tibble(t, X)
+Y <- rnorm(length(X), X, sigma_n)
+df <- df %>% 
+  mutate(Y=Y)
+Nzs <- c(2, 4, 8, 16, 32, 64, 128)
+Nthins <- c(round(10^seq(2, 3.5, 0.5)), N)
+m_aics <- matrix(nrow = length(Nzs),
+                 ncol = length(Nthins))
+for(i in seq_along(Nthins)) {
+  print(paste0("thin = ", i))
+  df_temp <- thin_series(Nthins[i], df, T)
+  m_aics[, i] <- aic_scan(df_temp, Nzs)
+}
+
+m_aics <- as.data.frame(m_aics)
+colnames(m_aics) <- Nthins
+m_aics <- m_aics %>% 
+  mutate(N=Nzs)
+saveRDS(m_aics, "../data/processed/ou_aics_bigger_sample.rds")
+g <- m_aics %>% 
+  pivot_longer(-N) %>% 
+  mutate(name=as.factor(name)) %>% 
+  mutate(name=fct_relevel(name, as.character(Nthins))) %>% 
+  ggplot(aes(x=N, y=value)) +
+  geom_line() +
+  geom_point() +
+  scale_x_log10() +
+  facet_wrap(~name, scales="free")
+g
+ggsave("../figures/ou_aics_thinning_bigger_sample.pdf", g,
+       width = 12, height = 6)
 ```
 

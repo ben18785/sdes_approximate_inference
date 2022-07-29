@@ -6,6 +6,7 @@ output: html_notebook
 ```{r}
 library(tidyverse)
 library(rstan)
+library(loo)
 options(mc.cores=4)
 rstan_options(auto_write=TRUE)
 source("helper.R")
@@ -82,9 +83,9 @@ stan_data <- list(
     kappa_width=10)
 init_fn_list <- list(
   theta=theta,
-  sigma=sigma,
+  kappa=kappa,
   sigma_n=1)
-Nzs <- c(2, 4, 8, 16, 32, 64, 128)
+Nzs <- c(2, 4, 8, 16, 32, 64)
 lfits <- vector(mode="list", length = length(Nzs))
 for(i in seq_along(Nzs)) {
   print(paste0("i = ", i))
@@ -98,7 +99,7 @@ Looking at estimates of parameters as a function of N
 extract_param <- function(param_name, fit) {
   rstan::extract(fit, param_name)[[1]]
 }
-Ns <- c("true", Nzs)
+Ns <- c(Nzs)
 params <- c("theta", "kappa", "sigma_n")
 k <- 1
 for(j in seq_along(params)) {
@@ -123,7 +124,7 @@ saveRDS(big_df, "../data/processed/gbm_approx_fits.rds")
 short_df <- tribble(
   ~param, ~value,
   "theta", theta,
-  "sigma", sigma,
+  "kappa", kappa,
   "sigma_n", sigma_n
 ) %>% 
   mutate(param=as.factor(param)) %>% 
@@ -144,7 +145,7 @@ ggsave("../figures/gbm_fits_vs_actual.pdf", g,
 
 Extract log-likelihoods to perform model comparison
 ```{r}
-loos <- vector(length = length(lfits))
+loos <- vector(length = length(lfits), mode="list")
 for(i in seq_along(loos)) {
   log_like <- extract_log_lik(lfits[[i]], "loglikelihood")
   loos[[i]] <- loo(log_like)
@@ -152,3 +153,26 @@ for(i in seq_along(loos)) {
 saveRDS(loos, "../data/processed/gbm_loos.rds")
 loo_compare(loos)
 ```
+
+# Try quick optimisation then AIC comparison
+```{r}
+Nzs <- c(2, 4, 8, 16, 32, 64, 128)
+lopts <- vector(mode="list", length = length(Nzs))
+for(i in seq_along(Nzs)) {
+  print(paste0("i = ", i))
+  lopts[[i]] <- optimise_model_any_z(
+    Nzs[i], model_approx, init_fn_list, stan_data)
+}
+
+# plot AIC
+lvals <- vector(length = length(Nzs))
+for(i in seq_along(lvals))
+  lvals[i] <- 2 * Nzs[i] - 2 * lopts[[i]]$value
+g <- tibble(N=Nzs, AIC=lvals) %>% 
+  ggplot(aes(x=N, y=AIC)) +
+  geom_point() +
+  geom_line()
+ggsave("../figures/gbm_aics.pdf", g,
+       width = 8, height = 4)
+```
+
