@@ -132,6 +132,7 @@ extract_param <- function(param_name, fit) {
 }
 Ns <- c("true", Nzs)
 params <- c("q", "sigma_n")
+lfits <- c(fit, lfits)
 k <- 1
 for(j in seq_along(params)) {
   for(i in seq_along(lfits)) {
@@ -166,11 +167,36 @@ ggsave("../figures/wiener_fits_vs_actual.pdf", g,
 
 Extract log-likelihoods to perform model comparison
 ```{r}
+lfits <- lfits[-1]
 loos <- vector(length = length(lfits))
 for(i in seq_along(loos)) {
-  log_like <- extract_log_lik(lfits[[i]], "loglikelihood")
+  log_like <- loo::extract_log_lik(lfits[[i]], "loglikelihood")
   loos[[i]] <- loo(log_like)
 }
 saveRDS(loos, "../data/processed/wiener_loos.rds")
 loo_compare(loos)
+```
+
+# Optimisation for AIC comparison
+```{r}
+Nzs <- c(2, 4, 8, 16, 32, 64, 128)
+lopts <- vector(mode="list", length = length(Nzs))
+for(i in seq_along(Nzs)) {
+  print(paste0("i = ", i))
+  lopts[[i]] <- optimise_model_any_z(
+    Nzs[i], model_approx, init_fn_list, stan_data,
+    ndims = 2)
+}
+
+# plot AIC
+lvals <- vector(length = length(Nzs))
+for(i in seq_along(lvals))
+  lvals[i] <- 2 * Nzs[i] - 2 * lopts[[i]]$value
+g <- tibble(N=Nzs, AIC=lvals) %>% 
+  ggplot(aes(x=N, y=AIC)) +
+  geom_point() +
+  geom_line() +
+  scale_x_log10()
+ggsave("../figures/wiener_aics.pdf", g,
+       width = 8, height = 4)
 ```

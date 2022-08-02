@@ -83,3 +83,9 @@ model {
   q ~ normal(0, 10);
   sigma_n ~ normal(0, 10);
 }
+
+generated quantities {
+  vector[nobs] loglikelihood;
+  for(i in 1:nobs)
+    loglikelihood[i] = normal_lpdf(Y[i]|X_sim[i], sigma_n);
+}
