@@ -115,7 +115,7 @@ stan_data <- list(
 )
 init_fn_list <- list(
   q=1, sigma_n=1)
-Nzs <- c(2, 4, 8, 16, 32, 64, 128)
+Nzs <- c(2, 4, 8, 16, 32, 64)
 lfits <- vector(mode="list", length = length(Nzs))
 for(i in seq_along(Nzs)) {
   print(paste0("i = ", i))
@@ -168,7 +168,7 @@ ggsave("../figures/wiener_fits_vs_actual.pdf", g,
 Extract log-likelihoods to perform model comparison
 ```{r}
 lfits <- lfits[-1]
-loos <- vector(length = length(lfits))
+loos <- vector(length = length(lfits), mode="list")
 for(i in seq_along(loos)) {
   log_like <- loo::extract_log_lik(lfits[[i]], "loglikelihood")
   loos[[i]] <- loo(log_like)

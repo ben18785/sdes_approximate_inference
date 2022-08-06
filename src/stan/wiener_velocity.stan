@@ -84,7 +84,7 @@ model {
     P_k = P_k_f(P_k_bar, K_k, S_k);
     
     mu = mu_f(H, m_k_bar);
-    Y[i] ~ normal(mu, S_k);
+    Y[i] ~ normal(mu, sqrt(S_k));
   }
 
   sigma_n ~ normal(0, 10);
