@@ -467,7 +467,7 @@ X_sim_1 <- rstan::extract(fit_ppc, "X_sim_1")[[1]][, , 1] %>%
 g2 <- X_sim_1 %>% 
   ggplot(aes(x=t, y=value,
              group=as.factor(iteration))) +
-  geom_line(alpha=0.3) +
+  geom_line(alpha=0.05) +
   scale_y_continuous("X")
 g <- cowplot::plot_grid(g1, g2, labels = c("A.", "B."))
 cowplot::save_plot("../figures/ou_ppcs.pdf", g,
