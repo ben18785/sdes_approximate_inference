@@ -124,7 +124,6 @@ model_approx <- stan_model("stan/ou_approx.stan")
 # fit model with many different Zs
 init_fn_list <- list(
   theta=theta,
-  sigma=sigma,
   sigma_n=1)
 Nzs <- c(2, 4, 8, 16, 32, 64, 128)
 stan_data <- list(
@@ -238,13 +237,15 @@ for(i in seq_along(Nzs)) {
 }
 
 # plot AIC
+N_theta <- 3 # theta, kappa, sigma
 lvals <- vector(length = length(Nzs))
 for(i in seq_along(lvals))
-  lvals[i] <- 2 * Nzs[i] - 2 * lopts[[i]]$value
+  lvals[i] <- 2 * (N_theta + Nzs[i]) - 2 * lopts[[i]]$value
 g <- tibble(N=Nzs, AIC=lvals) %>% 
   ggplot(aes(x=N, y=AIC)) +
   geom_point() +
-  geom_line()
+  geom_line() +
+  scale_x_log10(breaks=Nzs)
 ggsave("../figures/ou_aics.pdf", g,
        width = 8, height = 4)
 ```
@@ -277,7 +278,7 @@ aic_scan <- function(df, Nzs) {
   }
   lvals <- vector(length = length(Nzs))
 for(i in seq_along(lvals))
-  lvals[i] <- 2 * Nzs[i] - 2 * lopts[[i]]$value
+  lvals[i] <- 2 * (Nzs[i] + N_theta) - 2 * lopts[[i]]$value
   lvals
 }
 
@@ -309,7 +310,8 @@ ggsave("../figures/ou_aics_thinning.pdf", g,
        width = 12, height = 6)
 ```
 
-# Test robustness of results to particular dataset
+# Try a dataset with an order of magnitude more datapoints
+In each case, thin the dataset and recalculate the AICs.
 ```{r}
 N <- 5000
 X_0 <- 10
@@ -337,17 +339,138 @@ colnames(m_aics) <- Nthins
 m_aics <- m_aics %>% 
   mutate(N=Nzs)
 saveRDS(m_aics, "../data/processed/ou_aics_bigger_sample.rds")
+m_aics <- readRDS("../data/processed/ou_aics_bigger_sample.rds")
 g <- m_aics %>% 
   pivot_longer(-N) %>% 
+  filter(name != "100") %>% # with #datapoints = 100 sometimes we are estimating more Zs than datapoints
   mutate(name=as.factor(name)) %>% 
   mutate(name=fct_relevel(name, as.character(Nthins))) %>% 
   ggplot(aes(x=N, y=value)) +
   geom_line() +
   geom_point() +
-  scale_x_log10() +
-  facet_wrap(~name, scales="free")
+  scale_x_log10(breaks=Nzs) +
+  facet_wrap(~name, scales="free") +
+  ylab("AIC")
 g
 ggsave("../figures/ou_aics_thinning_bigger_sample.pdf", g,
        width = 12, height = 6)
+```
+
+# Simulate a number of datasets and for each determine AICs
+```{r}
+simulate_dataset <- function() {
+  N <- 500
+  X_0 <- 10
+  theta <- 1
+  kappa <- 1
+  sigma_n <- 1
+  t <- seq(0, T, T/N)
+  X <- simulate_ou(X_0, T, N, theta, kappa)
+  df <- tibble(t, X)
+  Y <- rnorm(length(X), X, sigma_n)
+  df <- df %>% 
+    mutate(Y=Y)
+  df %>% 
+    filter(t > 0)
+}
+
+Nzs <- c(2, 4, 8, 16, 32, 64, 128)
+Nrepeats <- 5
+m_aics <- matrix(nrow = length(Nzs),
+                 ncol = Nrepeats)
+for(i in 1:Nrepeats) {
+  print(paste0("iter = ", i))
+  df_temp <- simulate_dataset()
+  m_aics[, i] <- aic_scan(df_temp, Nzs)
+}
+
+m_aics <- as.data.frame(m_aics)
+colnames(m_aics) <- 1:Nrepeats
+m_aics <- m_aics %>% 
+  mutate(N=Nzs)
+saveRDS(m_aics, "../data/processed/ou_aics_different_samples.rds")
+m_aics <- readRDS("../data/processed/ou_aics_different_samples.rds")
+g <- m_aics %>%
+  pivot_longer(-N) %>%
+  mutate(name=as.factor(name)) %>%
+  ggplot(aes(x=N, y=value, colour=name)) +
+  geom_line() +
+  geom_point() +
+  scale_x_log10(breaks=Nzs) +
+  scale_color_brewer(palette = "Dark2") +
+  theme(legend.position = "none") +
+  ylab("AIC")
+g
+ggsave("../figures/ou_aics_repeats.pdf", g,
+       width = 8, height = 4)
+apply(m_aics, 2, which.min)
+```
+
+# Posterior predictive simulations
+```{r}
+model_approx <- stan_model("stan/ou_approx_posterior_predictive.stan")
+df <- simulate_dataset()
+stan_data <- list(
+    nobs=nrow(df),
+    t=df$t,
+    Y=df$Y,
+    X_0=X_0,
+    T=T,
+    kappa_mean=0,
+    kappa_width=10,
+    Nzsim=100)
+fit_ppc <- fit_model_any_z(32, model_approx, init_fn_list, stan_data, iters=400, refresh_val = 100)
+```
+
+Extract and plot
+```{r}
+X_sim <- rstan::extract(fit_ppc, "X_sim")[[1]]
+X_sim_n <- rstan::extract(fit_ppc, "X_sim_n")[[1]]
+lower <- apply(X_sim, 2, function(x) quantile(x, 0.025))
+middle <- apply(X_sim, 2, function(x) quantile(x, 0.5))
+upper <- apply(X_sim, 2, function(x) quantile(x, 0.975))
+lower_n <- apply(X_sim_n, 2, function(x) quantile(x, 0.025))
+middle_n <- apply(X_sim_n, 2, function(x) quantile(x, 0.5))
+upper_n <- apply(X_sim_n, 2, function(x) quantile(x, 0.975))
+
+df_sim <- tibble(
+  t=df$t, Y=middle, type="simulated: mean",
+  lower=lower, upper=upper
+)
+
+df_sim_n <- tibble(
+  t=df$t, Y=middle_n, type="simulated: overall",
+  lower=lower_n, upper=upper_n
+)
+
+df_sim_1 <- tibble(
+  t=df$t, Y=middle_n, type="simulated: overall",
+  lower=lower_n, upper=upper_n
+)
+
+g1 <- ggplot(df_sim, aes(x=t, y=Y)) +
+  geom_ribbon(data=df_sim_n,
+              aes(ymin=lower, ymax=upper),
+              fill="blue", alpha=0.7) +
+  geom_ribbon(aes(ymin=lower, ymax=upper),
+              fill="orange", alpha=0.7) +
+  geom_line(data=df, aes(y=X), colour="red") +
+  geom_point(data=df) +
+  scale_y_continuous("Y or X")
+
+X_sim_1 <- rstan::extract(fit_ppc, "X_sim_1")[[1]][, , 1] %>% 
+  as.data.frame() %>% 
+  mutate(iteration=seq_along(V1)) %>% 
+  pivot_longer(-iteration) %>% 
+  group_by(iteration) %>% 
+  mutate(t=df$t)
+g2 <- X_sim_1 %>% 
+  ggplot(aes(x=t, y=value,
+             group=as.factor(iteration))) +
+  geom_line(alpha=0.3) +
+  scale_y_continuous("X")
+g <- cowplot::plot_grid(g1, g2, labels = c("A.", "B."))
+cowplot::save_plot("../figures/ou_ppcs.pdf", g,
+                   base_width = 12, base_height=4)
 ```
 
