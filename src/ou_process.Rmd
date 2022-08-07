@@ -189,7 +189,8 @@ g <- ggplot(big_df,
                aes(linetype=N)) +
   scale_color_manual("", values = cols) +
   scale_linetype_manual("", values=c(rep(1, length(Ns) - 1), 2)) +
-  facet_wrap(~param, scales="free") +
+  facet_wrap(~param, scales="free",
+             labeller = label_parsed) +
   guides(colour = guide_legend(reverse=T),
          linetype = guide_legend(reverse=T))
 ggsave("../figures/ou_fits_vs_actual.pdf", g,
