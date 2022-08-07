@@ -7,6 +7,7 @@ output: html_notebook
 library(tidyverse)
 library(rstan)
 library(loo)
+library(RColorBrewer)
 options(mc.cores=4)
 rstan_options(auto_write=TRUE)
 source("helper.R")
@@ -110,7 +111,7 @@ stan_data <- list(
   X_0=X_0)
 
 fit <- sampling(model, data=stan_data,
-                iter=800, chains=4)
+                iter=2000, chains=4)
 print(fit, c("theta", "kappa", "sigma_n"))
 saveRDS(fit, "../data/processed/ou_exact_fit.rds")
 ```
@@ -138,7 +139,7 @@ lfits <- vector(mode="list", length = length(Nzs))
 for(i in seq_along(Nzs)) {
   print(paste0("i = ", i))
   lfits[[i]] <- fit_model_any_z(
-    Nzs[i], model_approx, init_fn_list, stan_data, iters=1000)
+    Nzs[i], model_approx, init_fn_list, stan_data, iters=2000)
 }
 ```
 
@@ -169,18 +170,50 @@ big_df <- big_df %>%
   mutate(param=as.factor(param)) %>% 
   mutate(param=fct_relevel(param, params))
 saveRDS(big_df, "../data/processed/ou_approx_fits.rds")
+params <- c("theta", "kappa", "sigma")
+Ns <- c(rev(Ns[-1]), "actual")
+big_df <- readRDS("../data/processed/ou_approx_fits.rds") %>% 
+  mutate(param=as.character(param)) %>% 
+  mutate(param=if_else(param=="sigma_n", "sigma", param)) %>% 
+  mutate(param=fct_relevel(param, params)) %>% 
+  mutate(N=if_else(N=="true", "actual", N)) %>% 
+  mutate(N=fct_relevel(N, Ns)) %>% 
+  mutate(type=if_else(N=="actual", "actual", "approx")) %>% 
+  mutate(type=fct_relevel(type, "approx", "actual"))
+
+cols <- brewer.pal(length(Ns) - 1, "Spectral")
+cols <- c(cols, "#000000")
 
 g <- ggplot(big_df,
-       aes(x=value, colour=as.factor(N))) +
-  geom_density(data=big_df %>% filter(N != "true") %>% 
-                 mutate(N=as.numeric(as.character(N)))) +
-  geom_density(data=big_df %>% filter(N == "true"),
-               colour="black", linetype=2) +
-  scale_color_brewer("N", palette = "Spectral") +
-  facet_wrap(~param, scales="free")
+       aes(x=value, colour=N)) +
+  stat_density(geom="line", position="identity",
+               aes(linetype=N)) +
+  scale_color_manual("", values = cols) +
+  scale_linetype_manual("", values=c(rep(1, length(Ns) - 1), 2)) +
+  facet_wrap(~param, scales="free") +
+  guides(colour = guide_legend(reverse=T),
+         linetype = guide_legend(reverse=T))
 ggsave("../figures/ou_fits_vs_actual.pdf", g,
-       width = 10, height = 6)
+       width = 8, height = 4)
 ```
+
+Check convergence
+```{r}
+rhats <- vector(length=length(lfits))
+esss <- vector(length=length(lfits))
+for(i in seq_along(lfits)) {
+  sum_df <- posterior::summarise_draws(lfits[[i]])
+  rhats[i] <- sum(sum_df$rhat > 1.01, na.rm = T)
+  bulk_ess <- sum(sum_df$ess_bulk < 400, na.rm = T)
+  tail_ess <- sum(sum_df$ess_tail < 400, na.rm = T)
+  esss[i] <- bulk_ess + tail_ess
+}
+conv_df <- tibble(
+  rhat=rhats, ess=esss
+)
+saveRDS(conv_df, "../data/processed/ou_convergence_diags.rds")
+```
+
 
 Extract log-likelihoods to perform model comparison
 ```{r}

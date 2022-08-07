@@ -2050,58 +2050,16 @@ ggsave(&quot;../figures/wiener_fits_vs_actual.pdf&quot;, g,
 <p>Extract log-likelihoods to perform model comparison</p>
 <!-- rnb-text-end -->
 <!-- rnb-chunk-begin -->
-<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxubG9vcyA8LSB2ZWN0b3IobGVuZ3RoID0gbGVuZ3RoKGxmaXRzKSwgbW9kZT1cImxpc3RcIilcbmZvcihpIGluIHNlcV9hbG9uZyhsb29zKSkge1xuICBsb2dfbGlrZSA8LSBsb286OmV4dHJhY3RfbG9nX2xpayhsZml0c1tbaV1dLCBcImxvZ2xpa2VsaWhvb2RcIilcbiAgbG9vc1tbaV1dIDwtIGxvbyhsb2dfbGlrZSlcbn1cblxuYGBgIn0= -->
-<pre class="r"><code>loos &lt;- vector(length = length(lfits), mode=&quot;list&quot;)
+<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxubGZpdHMgPC0gbGZpdHNbLTFdXG5sb29zIDwtIHZlY3RvcihsZW5ndGggPSBsZW5ndGgobGZpdHMpLCBtb2RlPVwibGlzdFwiKVxuZm9yKGkgaW4gc2VxX2Fsb25nKGxvb3MpKSB7XG4gIGxvZ19saWtlIDwtIGxvbzo6ZXh0cmFjdF9sb2dfbGlrKGxmaXRzW1tpXV0sIFwibG9nbGlrZWxpaG9vZFwiKVxuICBsb29zW1tpXV0gPC0gbG9vKGxvZ19saWtlKVxufVxuc2F2ZVJEUyhsb29zLCBcIi4uL2RhdGEvcHJvY2Vzc2VkL3dpZW5lcl9sb29zLnJkc1wiKVxubG9vX2NvbXBhcmUobG9vcylcbmBgYCJ9 -->
+<pre class="r"><code>lfits &lt;- lfits[-1]
+loos &lt;- vector(length = length(lfits), mode=&quot;list&quot;)
 for(i in seq_along(loos)) {
   log_like &lt;- loo::extract_log_lik(lfits[[i]], &quot;loglikelihood&quot;)
   loos[[i]] &lt;- loo(log_like)
 }
-</code></pre>
-<!-- rnb-source-end -->
-<!-- rnb-output-begin eyJkYXRhIjoiV2FybmluZzogUmVsYXRpdmUgZWZmZWN0aXZlIHNhbXBsZSBzaXplcyAoJ3JfZWZmJyBhcmd1bWVudCkgbm90IHNwZWNpZmllZC5cbkZvciBtb2RlbHMgZml0IHdpdGggTUNNQywgdGhlIHJlcG9ydGVkIFBTSVMgZWZmZWN0aXZlIHNhbXBsZSBzaXplcyBhbmQgXG5NQ1NFIGVzdGltYXRlcyB3aWxsIGJlIG92ZXItb3B0aW1pc3RpYy5cbldhcm5pbmc6IFNvbWUgUGFyZXRvIGsgZGlhZ25vc3RpYyB2YWx1ZXMgYXJlIHRvbyBoaWdoLiBTZWUgaGVscCgncGFyZXRvLWstZGlhZ25vc3RpYycpIGZvciBkZXRhaWxzLlxuXG5XYXJuaW5nOiBSZWxhdGl2ZSBlZmZlY3RpdmUgc2FtcGxlIHNpemVzICgncl9lZmYnIGFyZ3VtZW50KSBub3Qgc3BlY2lmaWVkLlxuRm9yIG1vZGVscyBmaXQgd2l0aCBNQ01DLCB0aGUgcmVwb3J0ZWQgUFNJUyBlZmZlY3RpdmUgc2FtcGxlIHNpemVzIGFuZCBcbk1DU0UgZXN0aW1hdGVzIHdpbGwgYmUgb3Zlci1vcHRpbWlzdGljLlxuV2FybmluZzogU29tZSBQYXJldG8gayBkaWFnbm9zdGljIHZhbHVlcyBhcmUgdG9vIGhpZ2guIFNlZSBoZWxwKCdwYXJldG8tay1kaWFnbm9zdGljJykgZm9yIGRldGFpbHMuXG5cbldhcm5pbmc6IFJlbGF0aXZlIGVmZmVjdGl2ZSBzYW1wbGUgc2l6ZXMgKCdyX2VmZicgYXJndW1lbnQpIG5vdCBzcGVjaWZpZWQuXG5Gb3IgbW9kZWxzIGZpdCB3aXRoIE1DTUMsIHRoZSByZXBvcnRlZCBQU0lTIGVmZmVjdGl2ZSBzYW1wbGUgc2l6ZXMgYW5kIFxuTUNTRSBlc3RpbWF0ZXMgd2lsbCBiZSBvdmVyLW9wdGltaXN0aWMuXG5XYXJuaW5nOiBTb21lIFBhcmV0byBrIGRpYWdub3N0aWMgdmFsdWVzIGFyZSB0b28gaGlnaC4gU2VlIGhlbHAoJ3BhcmV0by1rLWRpYWdub3N0aWMnKSBmb3IgZGV0YWlscy5cblxuV2FybmluZzogUmVsYXRpdmUgZWZmZWN0aXZlIHNhbXBsZSBzaXplcyAoJ3JfZWZmJyBhcmd1bWVudCkgbm90IHNwZWNpZmllZC5cbkZvciBtb2RlbHMgZml0IHdpdGggTUNNQywgdGhlIHJlcG9ydGVkIFBTSVMgZWZmZWN0aXZlIHNhbXBsZSBzaXplcyBhbmQgXG5NQ1NFIGVzdGltYXRlcyB3aWxsIGJlIG92ZXItb3B0aW1pc3RpYy5cbldhcm5pbmc6IFNvbWUgUGFyZXRvIGsgZGlhZ25vc3RpYyB2YWx1ZXMgYXJlIHRvbyBoaWdoLiBTZWUgaGVscCgncGFyZXRvLWstZGlhZ25vc3RpYycpIGZvciBkZXRhaWxzLlxuXG5XYXJuaW5nOiBSZWxhdGl2ZSBlZmZlY3RpdmUgc2FtcGxlIHNpemVzICgncl9lZmYnIGFyZ3VtZW50KSBub3Qgc3BlY2lmaWVkLlxuRm9yIG1vZGVscyBmaXQgd2l0aCBNQ01DLCB0aGUgcmVwb3J0ZWQgUFNJUyBlZmZlY3RpdmUgc2FtcGxlIHNpemVzIGFuZCBcbk1DU0UgZXN0aW1hdGVzIHdpbGwgYmUgb3Zlci1vcHRpbWlzdGljLlxuV2FybmluZzogU29tZSBQYXJldG8gayBkaWFnbm9zdGljIHZhbHVlcyBhcmUgdG9vIGhpZ2guIFNlZSBoZWxwKCdwYXJldG8tay1kaWFnbm9zdGljJykgZm9yIGRldGFpbHMuXG5cbldhcm5pbmc6IFJlbGF0aXZlIGVmZmVjdGl2ZSBzYW1wbGUgc2l6ZXMgKCdyX2VmZicgYXJndW1lbnQpIG5vdCBzcGVjaWZpZWQuXG5Gb3IgbW9kZWxzIGZpdCB3aXRoIE1DTUMsIHRoZSByZXBvcnRlZCBQU0lTIGVmZmVjdGl2ZSBzYW1wbGUgc2l6ZXMgYW5kIFxuTUNTRSBlc3RpbWF0ZXMgd2lsbCBiZSBvdmVyLW9wdGltaXN0aWMuXG5XYXJuaW5nOiBTb21lIFBhcmV0byBrIGRpYWdub3N0aWMgdmFsdWVzIGFyZSB0b28gaGlnaC4gU2VlIGhlbHAoJ3BhcmV0by1rLWRpYWdub3N0aWMnKSBmb3IgZGV0YWlscy5cbiJ9 -->
-<pre><code>Warning: Relative effective sample sizes (&#39;r_eff&#39; argument) not specified.
-For models fit with MCMC, the reported PSIS effective sample sizes and 
-MCSE estimates will be over-optimistic.
-Warning: Some Pareto k diagnostic values are too high. See help(&#39;pareto-k-diagnostic&#39;) for details.
-
-Warning: Relative effective sample sizes (&#39;r_eff&#39; argument) not specified.
-For models fit with MCMC, the reported PSIS effective sample sizes and 
-MCSE estimates will be over-optimistic.
-Warning: Some Pareto k diagnostic values are too high. See help(&#39;pareto-k-diagnostic&#39;) for details.
-
-Warning: Relative effective sample sizes (&#39;r_eff&#39; argument) not specified.
-For models fit with MCMC, the reported PSIS effective sample sizes and 
-MCSE estimates will be over-optimistic.
-Warning: Some Pareto k diagnostic values are too high. See help(&#39;pareto-k-diagnostic&#39;) for details.
-
-Warning: Relative effective sample sizes (&#39;r_eff&#39; argument) not specified.
-For models fit with MCMC, the reported PSIS effective sample sizes and 
-MCSE estimates will be over-optimistic.
-Warning: Some Pareto k diagnostic values are too high. See help(&#39;pareto-k-diagnostic&#39;) for details.
-
-Warning: Relative effective sample sizes (&#39;r_eff&#39; argument) not specified.
-For models fit with MCMC, the reported PSIS effective sample sizes and 
-MCSE estimates will be over-optimistic.
-Warning: Some Pareto k diagnostic values are too high. See help(&#39;pareto-k-diagnostic&#39;) for details.
-
-Warning: Relative effective sample sizes (&#39;r_eff&#39; argument) not specified.
-For models fit with MCMC, the reported PSIS effective sample sizes and 
-MCSE estimates will be over-optimistic.
-Warning: Some Pareto k diagnostic values are too high. See help(&#39;pareto-k-diagnostic&#39;) for details.</code></pre>
-<!-- rnb-output-end -->
-<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxuc2F2ZVJEUyhsb29zLCBcIi4uL2RhdGEvcHJvY2Vzc2VkL3dpZW5lcl9sb29zLnJkc1wiKVxubG9vX2NvbXBhcmUobG9vcylcbmBgYCJ9 -->
-<pre class="r"><code>saveRDS(loos, &quot;../data/processed/wiener_loos.rds&quot;)
+saveRDS(loos, &quot;../data/processed/wiener_loos.rds&quot;)
 loo_compare(loos)</code></pre>
 <!-- rnb-source-end -->
-<!-- rnb-output-begin eyJkYXRhIjoiICAgICAgIGVscGRfZGlmZiBzZV9kaWZmXG5tb2RlbDEgICAgIDAuMCAgICAgICAwLjBcbm1vZGVsMiAgLTk4MS4xICAgICAgNjYuN1xubW9kZWwzIC0xMTc0LjcgICAgICA3Ny45XG5tb2RlbDQgLTE0NzUuOSAgICAgIDkzLjJcbm1vZGVsNSAtMTY3Ny4wICAgICAxMDEuNVxubW9kZWw2IC0xODI0LjUgICAgIDExMS4wXG4ifQ== -->
-<pre><code>       elpd_diff se_diff
-model1     0.0       0.0
-model2  -981.1      66.7
-model3 -1174.7      77.9
-model4 -1475.9      93.2
-model5 -1677.0     101.5
-model6 -1824.5     111.0</code></pre>
-<!-- rnb-output-end -->
 <!-- rnb-chunk-end -->
 <!-- rnb-text-begin -->
 </div>
