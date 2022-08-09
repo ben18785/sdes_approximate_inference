@@ -61,7 +61,7 @@ df <- df %>%
 df %>% 
   ggplot(aes(x=t, y=Y)) +
   geom_line()
-saveRDS(df, "../data/processed/gbm_simulation.rds")
+# saveRDS(df, "../data/processed/gbm_simulation.rds")
 
 # remove zero time entry as causes issues for ODE integrator in Stan
 df <- df %>% 
@@ -85,12 +85,13 @@ init_fn_list <- list(
   theta=theta,
   kappa=kappa,
   sigma_n=1)
-Nzs <- c(2, 4, 8, 16, 32, 64)
+Nzs <- c(2, 4, 8, 16, 32, 64, 128, 256)
 lfits <- vector(mode="list", length = length(Nzs))
 for(i in seq_along(Nzs)) {
   print(paste0("i = ", i))
   lfits[[i]] <- fit_model_any_z(
-    Nzs[i], model_approx, init_fn_list, stan_data)
+    Nzs[i], model_approx, init_fn_list, stan_data,
+    iters=2000)
 }
 ```
 
@@ -121,27 +122,49 @@ big_df <- big_df %>%
   mutate(param=fct_relevel(param, params))
 saveRDS(big_df, "../data/processed/gbm_approx_fits.rds")
 
+params <- c("theta", "kappa", "sigma")
+big_df <- readRDS("../data/processed/gbm_approx_fits.rds") %>% 
+  mutate(param=as.character(param)) %>% 
+  mutate(param=if_else(param=="sigma_n", "sigma", param)) %>% 
+  mutate(param=fct_relevel(param, params))
+
 short_df <- tribble(
   ~param, ~value,
   "theta", theta,
   "kappa", kappa,
-  "sigma_n", sigma_n
+  "sigma", sigma_n
 ) %>% 
   mutate(param=as.factor(param)) %>% 
   mutate(param=fct_relevel(param, params))
 
 g <- ggplot(big_df,
-       aes(x=value)) +
-  geom_density(aes(colour=as.factor(N)), data=big_df %>% filter(N != "true") %>%
+       aes(x=value, colour=as.factor(N))) +
+  stat_density(geom="line", position="identity",
+               data=big_df %>% filter(N != "true") %>%
                  mutate(N=as.numeric(as.character(N)))) +
-  geom_density(aes(colour=as.factor(N)), data=big_df %>% filter(N == "true"),
-               colour="black", linetype=2) +
   scale_color_brewer("N", palette = "Spectral") +
-   geom_vline(data=short_df, aes(xintercept=value), linetype=3) +
-  facet_wrap(~param, scales="free")
+   geom_vline(data=short_df, aes(xintercept=value), linetype=2) +
+  facet_wrap(~param, scales="free",
+             labeller = label_parsed)
 ggsave("../figures/gbm_fits_vs_actual.pdf", g,
        width = 10, height = 6)
 ```
+
+Plotting the joint distribution of (kappa, sigma) as a function of N
+```{r}
+g <- big_df %>% 
+  pivot_wider(id_cols = c(iter, N),
+              values_from = value,
+              names_from = param) %>% 
+  ggplot(aes(x=kappa, y=sigma, colour=as.factor(N))) +
+  geom_point() +
+  scale_color_brewer("N", palette = "Spectral") +
+  xlab(latex2exp::TeX("$\\kappa$")) +
+  ylab(latex2exp::TeX("$\\sigma$"))
+ggsave("../figures/gbm_scatter.pdf", g, width = 6,
+       height = 4)
+```
+
 
 Extract log-likelihoods to perform model comparison
 ```{r}
@@ -154,9 +177,26 @@ saveRDS(loos, "../data/processed/gbm_loos.rds")
 loo_compare(loos)
 ```
 
+Check convergence
+```{r}
+rhats <- vector(length=length(lfits))
+esss <- vector(length=length(lfits))
+for(i in seq_along(lfits)) {
+  sum_df <- posterior::summarise_draws(lfits[[i]])
+  rhats[i] <- sum(sum_df$rhat > 1.01, na.rm = T)
+  bulk_ess <- sum(sum_df$ess_bulk < 400, na.rm = T)
+  tail_ess <- sum(sum_df$ess_tail < 400, na.rm = T)
+  esss[i] <- bulk_ess + tail_ess
+}
+conv_df <- tibble(
+  rhat=rhats, ess=esss
+)
+saveRDS(conv_df, "../data/processed/gbm_convergence_diags.rds")
+```
+
 # Try quick optimisation then AIC comparison
 ```{r}
-Nzs <- c(2, 4, 8, 16, 32, 64, 128)
+Nzs <- c(2, 4, 8, 16, 32, 64, 128, 256)
 lopts <- vector(mode="list", length = length(Nzs))
 for(i in seq_along(Nzs)) {
   print(paste0("i = ", i))
@@ -166,13 +206,122 @@ for(i in seq_along(Nzs)) {
 
 # plot AIC
 lvals <- vector(length = length(Nzs))
+N_theta <- 2
 for(i in seq_along(lvals))
-  lvals[i] <- 2 * Nzs[i] - 2 * lopts[[i]]$value
+  lvals[i] <- 2 * (Nzs[i] + N_theta) - 2 * lopts[[i]]$value
 g <- tibble(N=Nzs, AIC=lvals) %>% 
   ggplot(aes(x=N, y=AIC)) +
   geom_point() +
   geom_line()
 ggsave("../figures/gbm_aics.pdf", g,
+       width = 8, height = 4)
+```
+# AIC scans for different realisations
+```{r}
+aic_scan <- function(df, Nzs) {
+  lopts <- vector(mode="list", length = length(Nzs))
+  stan_data <- list(
+    nobs=nrow(df),
+    t=df$t,
+    Y=df$Y,
+    X_0=X_0,
+    T=T,
+    kappa_mean=0,
+    kappa_width=10)
+  
+  for(i in seq_along(Nzs)) {
+    print(paste0("i = ", i))
+    lopts[[i]] <- optimise_model_any_z(
+      Nzs[i], model_approx, init_fn_list, stan_data)
+  }
+  lvals <- vector(length = length(Nzs))
+for(i in seq_along(lvals))
+  lvals[i] <- 2 * (Nzs[i] + N_theta) - 2 * lopts[[i]]$value
+  lvals
+}
+
+simulate_dataset <- function(theta=0.5, kappa=0.5, sigma_n=0.1) {
+  T <- 10
+  N <- 500
+  X_0 <- 1
+  X <- simulate_gbm(X_0, T, N, theta, kappa)
+  t <- seq(0, T, T/N)
+  df <- tibble(t, X)
+  Y <- rlnorm(length(X), log(X) - 0.5 * sigma_n^2, sigma_n)
+  df <- df %>% 
+    mutate(Y=Y)
+  df %>% 
+    filter(t > 0)
+}
+
+Nzs <- c(2, 4, 8, 16, 32, 64, 128, 256)
+Nrepeats <- 5
+m_aics <- matrix(nrow = length(Nzs),
+                 ncol = Nrepeats)
+for(i in 1:Nrepeats) {
+  print(paste0("iter = ", i))
+  df_temp <- simulate_dataset()
+  m_aics[, i] <- aic_scan(df_temp, Nzs)
+}
+
+m_aics <- as.data.frame(m_aics)
+colnames(m_aics) <- 1:Nrepeats
+m_aics <- m_aics %>% 
+  mutate(N=Nzs)
+saveRDS(m_aics, "../data/processed/gbm_aics_different_samples.rds")
+m_aics <- readRDS("../data/processed/gbm_aics_different_samples.rds")
+g <- m_aics %>%
+  pivot_longer(-N) %>%
+  mutate(name=as.factor(name)) %>%
+  ggplot(aes(x=N, y=value, colour=name)) +
+  geom_line() +
+  geom_point() +
+  scale_x_log10(breaks=Nzs) +
+  scale_color_brewer(palette = "Dark2") +
+  theme(legend.position = "none") +
+  ylab("AIC")
+g
+ggsave("../figures/gbm_aics_repeats.pdf", g,
+       width = 8, height = 4)
+apply(m_aics, 2, which.min)
+```
+
+# Perform AIC scan for completely different parameter set
+```{r}
+theta <- -0.5
+kappa <- 0.1
+sigma_n <- 0.2
+
+Nzs <- c(2, 4, 8, 16, 32, 64, 128, 256)
+Nrepeats <- 5
+m_aics <- matrix(nrow = length(Nzs),
+                 ncol = Nrepeats)
+for(i in 1:Nrepeats) {
+  print(paste0("iter = ", i))
+  df_temp <- simulate_dataset(theta=theta,
+                              kappa=kappa,
+                              sigma_n=sigma_n)
+  m_aics[, i] <- aic_scan(df_temp, Nzs)
+}
+
+m_aics <- as.data.frame(m_aics)
+colnames(m_aics) <- 1:Nrepeats
+m_aics <- m_aics %>% 
+  mutate(N=Nzs)
+saveRDS(m_aics, "../data/processed/gbm_aics_different_parameters.rds")
+m_aics <- readRDS("../data/processed/gbm_aics_different_parameters.rds")
+g <- m_aics %>%
+  pivot_longer(-N) %>%
+  mutate(name=as.factor(name)) %>%
+  ggplot(aes(x=N, y=value, colour=name)) +
+  geom_line() +
+  geom_point() +
+  scale_x_log10(breaks=Nzs) +
+  scale_color_brewer(palette = "Dark2") +
+  theme(legend.position = "none") +
+  ylab("AIC")
+g
+ggsave("../figures/gbm_aics_repeats_diff_parameters.pdf", g,
        width = 8, height = 4)
 ```
 
