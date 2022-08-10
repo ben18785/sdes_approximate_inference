@@ -216,6 +216,29 @@ g <- tibble(N=Nzs, AIC=lvals) %>%
 ggsave("../figures/gbm_aics.pdf", g,
        width = 8, height = 4)
 ```
+# Examine posterior predictive distributions of the mean
+```{r}
+fit <- fit_model_any_z(
+    32, model_approx, init_fn_list, stan_data,
+    iters=20,refresh_val = 10)
+X_sim <- rstan::extract(fit, "X_sim")[[1]][, , 1]
+lower <- apply(X_sim, 2, function(x) quantile(x, 0.025))
+middle <- apply(X_sim, 2, function(x) quantile(x, 0.5))
+upper <- apply(X_sim, 2, function(x) quantile(x, 0.975))
+
+df_sim_tmp <- tibble(lower, X=middle, upper, N=2,
+                     t=df$t)
+
+ggplot(df, aes(x=t, y=X)) +
+  geom_line() +
+  geom_line(data=df_sim_tmp, colour="blue") +
+  geom_ribbon(data=df_sim_tmp,
+              aes(ymin=lower, ymax=upper),
+              alpha=0.3, fill="blue")
+```
+
+
+
 # AIC scans for different realisations
 ```{r}
 aic_scan <- function(df, Nzs) {
