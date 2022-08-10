@@ -7,6 +7,7 @@ output: html_notebook
 library(tidyverse)
 library(rstan)
 library(mvtnorm)
+library(RColorBrewer)
 options(mc.cores=4)
 rstan_options(auto_write=TRUE)
 source("helper.R")
@@ -98,6 +99,7 @@ stan_data <- list(
 fit <- sampling(model, data=stan_data, iter=2000,
                 chains=4)
 saveRDS(fit, "../data/processed/wiener_velocity_exact_fit.rds")
+fit <- readRDS("../data/processed/wiener_velocity_exact_fit.rds")
 ```
 
 # Approximate inference
@@ -121,7 +123,7 @@ for(i in seq_along(Nzs)) {
   print(paste0("i = ", i))
   lfits[[i]] <- fit_model_any_z(
     Nzs[i], model_approx, init_fn_list, stan_data,
-    ndims=2)
+    ndims=1, iters=2000)
 }
 ```
 
@@ -152,15 +154,29 @@ big_df <- big_df %>%
   mutate(param=as.factor(param)) %>% 
   mutate(param=fct_relevel(param, params))
 saveRDS(big_df, "../data/processed/wiener_approx_fits.rds")
+Ns <- c(rev(Ns[-1]), "actual")
+big_df <- readRDS("../data/processed/wiener_approx_fits.rds") %>% 
+  mutate(param=as.character(param)) %>% 
+  mutate(param=if_else(param=="sigma_n", "sigma", param)) %>% 
+  mutate(param=fct_relevel(param, params)) %>% 
+  mutate(N=if_else(N=="true", "actual", N)) %>% 
+  mutate(N=fct_relevel(N, Ns)) %>% 
+  mutate(type=if_else(N=="actual", "actual", "approx")) %>% 
+  mutate(type=fct_relevel(type, "approx", "actual"))
+
+cols <- brewer.pal(length(Ns) - 1, "Spectral")
+cols <- c(cols, "#000000")
 
 g <- ggplot(big_df,
-       aes(x=value, colour=as.factor(N))) +
-  geom_density(data=big_df %>% filter(N != "true") %>% 
-                 mutate(N=as.numeric(as.character(N)))) +
-  geom_density(data=big_df %>% filter(N == "true"),
-               colour="black", linetype=2) +
-  scale_color_brewer("N", palette = "Spectral") +
-  facet_wrap(~param, scales="free")
+       aes(x=value, colour=N)) +
+  stat_density(geom="line", position="identity",
+               aes(linetype=N)) +
+  scale_color_manual("", values = cols) +
+  scale_linetype_manual("", values=c(rep(1, length(Ns) - 1), 2)) +
+  facet_wrap(~param, scales="free",
+             labeller = label_parsed) +
+  guides(colour = guide_legend(reverse=T),
+         linetype = guide_legend(reverse=T))
 ggsave("../figures/wiener_fits_vs_actual.pdf", g,
        width = 10, height = 6)
 ```
@@ -179,20 +195,22 @@ loo_compare(loos)
 
 # Optimisation for AIC comparison
 ```{r}
-Nzs <- c(2, 4, 8, 16, 32, 64, 128)
+Nzs <- c(2, 4, 8, 16, 32, 64)
 lopts <- vector(mode="list", length = length(Nzs))
 for(i in seq_along(Nzs)) {
   print(paste0("i = ", i))
   lopts[[i]] <- optimise_model_any_z(
     Nzs[i], model_approx, init_fn_list, stan_data,
-    ndims = 2)
+    ndims = 1)
 }
 
 # plot AIC
+N_theta <- 2
 lvals <- vector(length = length(Nzs))
 for(i in seq_along(lvals))
-  lvals[i] <- 2 * Nzs[i] - 2 * lopts[[i]]$value
-g <- tibble(N=Nzs, AIC=lvals) %>% 
+  lvals[i] <- (Nzs[i] + N_theta) - 2 * lopts[[i]]$value
+g <- tibble(N=Nzs, AIC=lvals) %>%
+  filter(N > 2) %>% 
   ggplot(aes(x=N, y=AIC)) +
   geom_point() +
   geom_line() +
