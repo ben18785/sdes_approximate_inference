@@ -100,7 +100,8 @@ lfits <- vector(mode="list", length = length(Nzs))
 for(i in seq_along(Nzs)) {
   print(paste0("i = ", i))
   lfits[[i]] <- fit_model_any_z(
-    Nzs[i], model_approx, init_fn_list, stan_data)
+    Nzs[i], model_approx, init_fn_list, stan_data,
+    iters=2000)
 }
 ```
 
@@ -130,13 +131,17 @@ big_df <- big_df %>%
   mutate(param=as.factor(param)) %>% 
   mutate(param=fct_relevel(param, params))
 saveRDS(big_df, "../data/processed/double_well_approx_fits.rds")
-
+big_df <- readRDS("../data/processed/double_well_approx_fits.rds") %>% 
+  mutate(param=as.character(param)) %>% 
+  mutate(param=if_else(param=="sigma_n", "sigma", param)) %>% 
+  mutate(param=fct_relevel(param, params))
+params <- c("alpha", "gamma", "kappa", "sigma")
 short_df <- tribble(
   ~param, ~value,
   "alpha", alpha,
   "gamma", gamma,
   "kappa", kappa,
-  "sigma_n", sigma_n
+  "sigma", sigma_n
 ) %>% 
   mutate(param=as.factor(param)) %>% 
   mutate(param=fct_relevel(param, params))
@@ -164,6 +169,24 @@ for(i in seq_along(loos)) {
 saveRDS(loos, "../data/processed/double_well_loos.rds")
 loo_compare(loos)
 ```
+
+Check convergence
+```{r}
+rhats <- vector(length=length(lfits))
+esss <- vector(length=length(lfits))
+for(i in seq_along(lfits)) {
+  sum_df <- posterior::summarise_draws(lfits[[i]])
+  rhats[i] <- sum(sum_df$rhat > 1.01, na.rm = T)
+  bulk_ess <- sum(sum_df$ess_bulk < 400, na.rm = T)
+  tail_ess <- sum(sum_df$ess_tail < 400, na.rm = T)
+  esss[i] <- bulk_ess + tail_ess
+}
+conv_df <- tibble(
+  rhat=rhats, ess=esss
+)
+saveRDS(conv_df, "../data/processed/double_well_convergence_diags.rds")
+```
+
 # Optimisation for AIC comparison
 ```{r}
 Nzs <- c(2, 4, 8, 16, 32, 64, 128)
@@ -175,13 +198,15 @@ for(i in seq_along(Nzs)) {
 }
 
 # plot AIC
+N_theta <- 4
 lvals <- vector(length = length(Nzs))
 for(i in seq_along(lvals))
   lvals[i] <- 2 * Nzs[i] - 2 * lopts[[i]]$value
 g <- tibble(N=Nzs, AIC=lvals) %>% 
   ggplot(aes(x=N, y=AIC)) +
   geom_point() +
-  geom_line()
+  geom_line() + 
+  scale_x_log10(breaks=Nzs)
 ggsave("../figures/double_well_aics.pdf", g,
        width = 8, height = 4)
 ```

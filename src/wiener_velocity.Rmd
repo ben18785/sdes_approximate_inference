@@ -208,7 +208,7 @@ for(i in seq_along(Nzs)) {
 N_theta <- 2
 lvals <- vector(length = length(Nzs))
 for(i in seq_along(lvals))
-  lvals[i] <- (Nzs[i] + N_theta) - 2 * lopts[[i]]$value
+  lvals[i] <- 2 * (Nzs[i] + N_theta) - 2 * lopts[[i]]$value
 g <- tibble(N=Nzs, AIC=lvals) %>%
   filter(N > 2) %>% 
   ggplot(aes(x=N, y=AIC)) +
