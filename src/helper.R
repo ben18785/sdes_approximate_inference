@@ -7,7 +7,7 @@ fit_model_any_z <- function(N_zs, model, init_fn_list, base_stan_data, refresh_v
   stan_data$N <- N_zs
   fit <- sampling(model,
                   data=stan_data,
-                  iter=iters, chains=4, init=init_fn1,
+                  iter=iters, chains=1, init=init_fn1,
                   refresh=refresh_val)
   fit
 }
@@ -24,4 +24,10 @@ optimise_model_any_z <- function(N_zs, model, init_fn_list, base_stan_data, refr
                   init=init_fn1,
                   as_vector=FALSE)
   fit
+}
+
+brownian_motion <- function(T, N) {
+  delta_t <- T / N
+  dW <- rnorm(N, 0, sqrt(delta_t))
+  c(0, cumsum(dW))
 }

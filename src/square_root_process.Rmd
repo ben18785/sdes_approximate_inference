@@ -1,0 +1,113 @@
+---
+title: "Square root process"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(rstan)
+library(loo)
+library(RColorBrewer)
+options(mc.cores=4)
+rstan_options(auto_write=TRUE)
+source("helper.R")
+set.seed(1)
+```
+
+In this notebook, we perform inference for the Orstein-Uhlenbeck (OU) process, which is described by the following SDE:
+
+\begin{equation}
+  dX(t) = dt + \kappa \sqrt{X(t)} dW(t).
+\end{equation}
+
+Throughout, we assume that $X(0)=10$ which is known and $\kappa=2$, which is not. The observations are corrupted by Gaussian measurement noise of the form:
+
+\begin{equation}
+  Y(t) \stackrel{i.i.d.}{\sim} \text{normal}(X(t), \sigma).
+\end{equation}
+
+We first simulate some data from the OU process with measurement noise using known parameters. Exact simulation of this process is possible, since there is a closed-form solution to this process:
+
+\begin{equation}
+X(t) = (W(t) + \sqrt{X(0)})^2
+\end{equation}
+
+```{r}
+simulate_sqrt <- function(X_0, T, N) {
+  W <- brownian_motion(T, N)
+  X <- (W + X_0)^2
+  X
+}
+
+T <- 10
+N <- 500
+X_0 <- 0
+X <- simulate_sqrt(X_0, T, N)
+t <- seq(0, T, T/N)
+
+# plot
+df <- tibble(t, X)
+df %>% 
+  ggplot(aes(x=t, y=X)) +
+  geom_line()
+```
+Now add Gaussian measurement noise
+```{r}
+sigma_n <- 1
+Y <- rnorm(length(X), X, sigma_n)
+df <- df %>% 
+  mutate(Y=Y)
+df %>%
+  ggplot(aes(x=t, y=Y)) +
+  geom_line()
+saveRDS(df, "../data/processed/sqrt_simulation.rds")
+
+# remove zero time entry as causes issues for ODE integrator in Stan
+df <- df %>% 
+  filter(t > 0)
+```
+
+# Optimisation for AIC comparison
+```{r}
+model_approx <- stan_model("stan/sqrt_approx.stan")
+# expose_stan_functions(model_approx)
+
+params <- c(2, 10, -1, 2)
+X_sim <- int_x(500, 0.0, df$t, params, c(1, 2), c(2))
+plot(unlist(X_sim))
+
+# fit model with many different Zs
+init_fn_list <- list(
+  kappa=2,
+  sigma_n=1)
+Nzs <- c(2, 4, 8, 16, 32, 64, 128)
+stan_data <- list(
+    nobs=nrow(df),
+    t=df$t,
+    Y=df$Y,
+    X_0=X_0,
+    T=T,
+    kappa_mean=0,
+    kappa_width=10)
+
+Nzs <- c(2, 4, 8, 16, 32)
+lopts <- vector(mode="list", length = length(Nzs))
+for(i in seq_along(Nzs)) {
+  print(paste0("i = ", i))
+  lopts[[i]] <- optimise_model_any_z(
+    Nzs[i], model_approx, init_fn_list, stan_data)
+}
+
+# plot AIC
+N_theta <- 3 # theta, kappa, sigma
+lvals <- vector(length = length(Nzs))
+for(i in seq_along(lvals))
+  lvals[i] <- 2 * (N_theta + Nzs[i]) - 2 * lopts[[i]]$value
+g <- tibble(N=Nzs, AIC=lvals) %>% 
+  ggplot(aes(x=N, y=AIC)) +
+  geom_point() +
+  geom_line() +
+  scale_x_log10(breaks=Nzs)
+ggsave("../figures/sqrt_aics.pdf", g,
+       width = 8, height = 4)
+```
