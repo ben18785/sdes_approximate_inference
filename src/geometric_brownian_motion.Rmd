@@ -203,8 +203,10 @@ for(i in seq_along(Nzs)) {
   lopts[[i]] <- optimise_model_any_z(
     Nzs[i], model_approx, init_fn_list, stan_data)
 }
+saveRDS(lopts, "../data/processed/gbm_opts.rds")
 
 # plot AIC
+N_theta <- 3
 lvals <- vector(length = length(Nzs))
 N_theta <- 2
 for(i in seq_along(lvals))
@@ -212,10 +214,88 @@ for(i in seq_along(lvals))
 g <- tibble(N=Nzs, AIC=lvals) %>% 
   ggplot(aes(x=N, y=AIC)) +
   geom_point() +
-  geom_line()
+  geom_line() +
+  scale_x_log10(breaks=Nzs)
 ggsave("../figures/gbm_aics.pdf", g,
        width = 8, height = 4)
 ```
+
+Plot fit as a function of N
+```{r}
+for(i in seq_along(lopts)) {
+  opt <- lopts[[i]]
+  temp_df <- tibble(t=df$t,
+                    X=opt$par$X_sim[, 1],
+                    N=Nzs[i])
+  if(i == 1)
+    big_df <- temp_df
+  else
+    big_df <- big_df %>% bind_rows(temp_df)
+}
+
+cols <- brewer.pal(length(Nzs), "Spectral")
+cols <- c("#000000", cols)
+Ns <- c("actual", Nzs)
+big_df <- big_df %>%
+  mutate(N=as.character(N)) %>% 
+  bind_rows(df %>% mutate(N="actual")) %>% 
+  mutate(N=as.factor(N)) %>% 
+  mutate(N=fct_relevel(N, Ns))
+
+g1 <- ggplot(df,
+       aes(x=t, y=X)) +
+  geom_line(data=big_df,
+            aes(colour=as.factor(N))) +
+  geom_line() +
+  scale_color_manual("", values = cols) +
+  theme(legend.position = "none")
+g1
+```
+Autocorrelations in errors
+```{r}
+for(i in seq_along(lopts)) {
+  opt <- lopts[[i]]
+  temp_df <- tibble(t=df$t,
+                    X=opt$par$X_sim[, 1],
+                    N=Nzs[i])
+  if(i == 1)
+    big_df <- temp_df
+  else
+    big_df <- big_df %>% bind_rows(temp_df)
+}
+
+df_true <- df %>% 
+  rename(X_true=X) %>% 
+  left_join(big_df) %>% 
+  mutate(resid=X_true-X)
+
+acf_val <- acf(df_true %>% filter(N==2) %>% pull(resid))
+m_acfs <- matrix(nrow = length(acf_val$acf), ncol=length(Nzs))
+for(i in seq_along(Nzs)) {
+  resids <- df_true %>% filter(N==Nzs[i]) %>% pull(resid)
+  acf_val <- acf(resids)$acf[, ,]
+  m_acfs[, i] <- acf_val
+}
+m_acfs <- as.data.frame(m_acfs)
+colnames(m_acfs) <- Nzs
+m_acfs$lag <- seq_along(m_acfs$`2`)
+g2 <- m_acfs %>% 
+  pivot_longer(-lag) %>% 
+  rename(N=name) %>% 
+  mutate(N=as.factor(N)) %>% 
+  mutate(N=fct_relevel(N, as.character(Nzs))) %>% 
+  ggplot(aes(x=lag, y=value, colour=N)) +
+  geom_line() +
+  ylab("autocorrelation") +
+  scale_colour_brewer("N", palette = "Spectral")
+g2
+```
+```{r}
+g <- cowplot::plot_grid(g1, g2, labels = c("A.", "B."))
+cowplot::save_plot("../figures/gbm_fit_autocorrelation.pdf", g, base_height = 6, base_width = 12)
+```
+
+
 # AIC scans for different realisations
 ```{r}
 aic_scan <- function(df, Nzs) {
@@ -254,7 +334,7 @@ simulate_dataset <- function(theta=0.5, kappa=0.5, sigma_n=0.1) {
     filter(t > 0)
 }
 
-Nzs <- c(2, 4, 8, 16, 32, 64, 128, 256)
+Nzs <- c(2, 4, 8, 16, 32, 64)
 Nrepeats <- 5
 m_aics <- matrix(nrow = length(Nzs),
                  ncol = Nrepeats)
@@ -292,36 +372,21 @@ theta <- -0.5
 kappa <- 0.1
 sigma_n <- 0.2
 
-Nzs <- c(2, 4, 8, 16, 32, 64, 128, 256)
-Nrepeats <- 5
-m_aics <- matrix(nrow = length(Nzs),
-                 ncol = Nrepeats)
-for(i in 1:Nrepeats) {
-  print(paste0("iter = ", i))
-  df_temp <- simulate_dataset(theta=theta,
-                              kappa=kappa,
-                              sigma_n=sigma_n)
-  m_aics[, i] <- aic_scan(df_temp, Nzs)
-}
-
-m_aics <- as.data.frame(m_aics)
-colnames(m_aics) <- 1:Nrepeats
-m_aics <- m_aics %>% 
-  mutate(N=Nzs)
-saveRDS(m_aics, "../data/processed/gbm_aics_different_parameters.rds")
-m_aics <- readRDS("../data/processed/gbm_aics_different_parameters.rds")
-g <- m_aics %>%
-  pivot_longer(-N) %>%
-  mutate(name=as.factor(name)) %>%
-  ggplot(aes(x=N, y=value, colour=name)) +
-  geom_line() +
+Nzs <- c(2, 4, 8, 16, 32, 64)
+df_temp <- simulate_dataset(theta=theta,
+                            kappa=kappa,
+                            sigma_n=sigma_n)
+df_temp %>% 
+  ggplot(aes(x=t, y=X)) +
+  geom_line()
+lvals <- aic_scan(df_temp, Nzs)
+g <- tibble(N=Nzs, AIC=lvals) %>% 
+  ggplot(aes(x=N, y=AIC)) +
   geom_point() +
-  scale_x_log10(breaks=Nzs) +
-  scale_color_brewer(palette = "Dark2") +
-  theme(legend.position = "none") +
-  ylab("AIC")
-g
-ggsave("../figures/gbm_aics_repeats_diff_parameters.pdf", g,
+  geom_line() +
+  scale_x_log10(breaks=Nzs)
+ggsave("../figures/gbm_aics_different_parameters.pdf", g,
        width = 8, height = 4)
 ```
+
 
