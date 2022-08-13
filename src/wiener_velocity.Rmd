@@ -125,6 +125,7 @@ for(i in seq_along(Nzs)) {
     Nzs[i], model_approx, init_fn_list, stan_data,
     ndims=1, iters=2000)
 }
+lfits <- c(fit, lfits)
 ```
 
 Looking at estimates of parameters as a function of N
@@ -134,7 +135,6 @@ extract_param <- function(param_name, fit) {
 }
 Ns <- c("true", Nzs)
 params <- c("q", "sigma_n")
-lfits <- c(fit, lfits)
 k <- 1
 for(j in seq_along(params)) {
   for(i in seq_along(lfits)) {
@@ -179,6 +179,23 @@ g <- ggplot(big_df,
          linetype = guide_legend(reverse=T))
 ggsave("../figures/wiener_fits_vs_actual.pdf", g,
        width = 10, height = 6)
+```
+
+Check convergence
+```{r}
+rhats <- vector(length=length(lfits))
+esss <- vector(length=length(lfits))
+for(i in seq_along(lfits)) {
+  sum_df <- posterior::summarise_draws(lfits[[i]])
+  rhats[i] <- sum(sum_df$rhat > 1.01, na.rm = T)
+  bulk_ess <- sum(sum_df$ess_bulk < 400, na.rm = T)
+  tail_ess <- sum(sum_df$ess_tail < 400, na.rm = T)
+  esss[i] <- bulk_ess + tail_ess
+}
+conv_df <- tibble(
+  rhat=rhats, ess=esss
+)
+saveRDS(conv_df, "../data/processed/wiener_convergence_diags.rds")
 ```
 
 Extract log-likelihoods to perform model comparison
