@@ -101,7 +101,7 @@ for(i in seq_along(Nzs)) {
   print(paste0("i = ", i))
   lfits[[i]] <- fit_model_any_z(
     Nzs[i], model_approx, init_fn_list, stan_data,
-    iters=2000)
+    iters=4000)
 }
 ```
 
@@ -146,15 +146,20 @@ short_df <- tribble(
   mutate(param=as.factor(param)) %>% 
   mutate(param=fct_relevel(param, params))
 
-g <- ggplot(big_df,
-       aes(x=value)) +
-  geom_density(aes(colour=as.factor(N)), data=big_df %>% filter(N != "true") %>%
+# remove few outlier values that skew plots
+big_df1 <- big_df %>% 
+  group_by(param) %>% 
+  filter(value <= quantile(value, 0.97))
+
+g <- ggplot(big_df1,
+       aes(x=value, colour=as.factor(N))) +
+  stat_density(geom="line", position="identity",
+               data=big_df1 %>% filter(N != "true") %>%
                  mutate(N=as.numeric(as.character(N)))) +
-  geom_density(aes(colour=as.factor(N)), data=big_df %>% filter(N == "true"),
-               colour="black", linetype=2) +
   scale_color_brewer("N", palette = "Spectral") +
-   geom_vline(data=short_df, aes(xintercept=value), linetype=3) +
-  facet_wrap(~param, scales="free")
+   geom_vline(data=short_df, aes(xintercept=value), linetype=2) +
+  facet_wrap(~param, scales="free",
+             labeller = label_parsed)
 ggsave("../figures/double_well_fits_vs_actual.pdf", g,
        width = 10, height = 6)
 ```
@@ -173,16 +178,24 @@ loo_compare(loos)
 Check convergence
 ```{r}
 rhats <- vector(length=length(lfits))
+rhats_higher <- vector(length=length(lfits))
 esss <- vector(length=length(lfits))
 for(i in seq_along(lfits)) {
+  print(i)
   sum_df <- posterior::summarise_draws(lfits[[i]])
+  sum_df1 <- sum_df %>% 
+    filter(variable%in%c("alpha", "kappa", "gamma", "sigma_n"))
+  sum_df2 <- sum_df %>% 
+    filter(str_detect(variable, "Z"))
+  sum_df <- sum_df1 %>% bind_rows(sum_df2)
   rhats[i] <- sum(sum_df$rhat > 1.01, na.rm = T)
+  rhats_higher[i] <- sum(sum_df$rhat > 1.1, na.rm = T)
   bulk_ess <- sum(sum_df$ess_bulk < 400, na.rm = T)
   tail_ess <- sum(sum_df$ess_tail < 400, na.rm = T)
   esss[i] <- bulk_ess + tail_ess
 }
 conv_df <- tibble(
-  rhat=rhats, ess=esss
+  rhat=rhats, ess=esss, rhat_1.10=rhats_higher
 )
 saveRDS(conv_df, "../data/processed/double_well_convergence_diags.rds")
 ```
